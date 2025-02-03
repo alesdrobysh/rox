@@ -1,29 +1,30 @@
-type Value = f64;
-enum OpCode {
-    Return,
-    Constant(Value),
-}
+mod chunk;
+mod vm;
 
-struct Chunk {
-    op_code: OpCode,
-    line: u32,
-}
-
-fn print_chunk(chunk: Chunk) {
-    match chunk.op_code {
-        OpCode::Return => println!("{:4} RETURN", chunk.line),
-        OpCode::Constant(value) => println!("{:4} CONSTANT {}", chunk.line, value),
-    }
-}
+use chunk::{Chunk, Instruction, OpCode};
 
 fn main() {
-    print_chunk(Chunk {
-        op_code: OpCode::Return,
+    let mut chunk = Chunk::new(Vec::new());
+
+    chunk.push(Instruction {
+        op_code: OpCode::Constant(1.567),
         line: 1,
     });
 
-    print_chunk(Chunk {
-        op_code: OpCode::Constant(1.0),
+    chunk.push(Instruction {
+        op_code: OpCode::Constant(28.0),
+        line: 1,
+    });
+
+    chunk.push(Instruction {
+        op_code: OpCode::Return,
         line: 2,
     });
+
+    let mut vm = vm::VM::new(chunk);
+
+    match vm.interpret() {
+        Ok(_) => println!("Interpretation successful"),
+        Err(e) => println!("Interpretation failed: {}", e),
+    };
 }
