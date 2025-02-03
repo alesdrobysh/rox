@@ -4,6 +4,11 @@ pub type Value = f64;
 pub enum OpCode {
     Return,
     Constant(Value),
+    Negate,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
 }
 
 impl Clone for OpCode {
@@ -59,6 +64,21 @@ pub fn print_instruction(instruction: Instruction) {
         }
         OpCode::Constant(value) => {
             println!("{:4} CONSTANT {}", instruction.line, value);
+        }
+        OpCode::Negate => {
+            println!("{:4} NEGATE", instruction.line);
+        }
+        OpCode::Add => {
+            println!("{:4} ADD", instruction.line);
+        }
+        OpCode::Subtract => {
+            println!("{:4} SUBTRACT", instruction.line);
+        }
+        OpCode::Multiply => {
+            println!("{:4} MULTIPLY", instruction.line);
+        }
+        OpCode::Divide => {
+            println!("{:4} DIVIDE", instruction.line);
         }
     }
 }

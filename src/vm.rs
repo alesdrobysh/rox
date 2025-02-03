@@ -29,8 +29,9 @@ impl VM {
 
             match env::var("DEBUG") {
                 Ok(_) => {
+                    println!("");
                     self.stack.iter().for_each(|v| println!("[{}]", v));
-                    print_instruction(instruction)
+                    print_instruction(instruction);
                 }
                 Err(_) => {}
             }
@@ -40,6 +41,26 @@ impl VM {
                 OpCode::Constant(value) => {
                     self.stack.push(value);
                 }
+                OpCode::Negate => match self.stack.pop() {
+                    Some(value) => self.stack.push(-value),
+                    None => return Err("No value to negate".to_string()),
+                },
+                OpCode::Add => match (self.stack.pop(), self.stack.pop()) {
+                    (Some(a), Some(b)) => self.stack.push(a + b),
+                    _ => return Err("Not enough values to add".to_string()),
+                },
+                OpCode::Subtract => match (self.stack.pop(), self.stack.pop()) {
+                    (Some(a), Some(b)) => self.stack.push(b - a),
+                    _ => return Err("Not enough values to subtract".to_string()),
+                },
+                OpCode::Multiply => match (self.stack.pop(), self.stack.pop()) {
+                    (Some(a), Some(b)) => self.stack.push(a * b),
+                    _ => return Err("Not enough values to multiply".to_string()),
+                },
+                OpCode::Divide => match (self.stack.pop(), self.stack.pop()) {
+                    (Some(a), Some(b)) => self.stack.push(b / a),
+                    _ => return Err("Not enough values to divide".to_string()),
+                },
             }
         }
     }
