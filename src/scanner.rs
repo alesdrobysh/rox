@@ -1,12 +1,12 @@
-pub struct Scanner {
-    source: String,
+pub struct Scanner<'a> {
+    source: &'a str,
     start: usize,
     current: usize,
     line: usize,
 }
 
-impl Scanner {
-    pub fn new(source: String) -> Scanner {
+impl<'a> Scanner<'a> {
+    pub fn new(source: &'a str) -> Scanner<'a> {
         Scanner {
             source,
             start: 0,
@@ -15,53 +15,52 @@ impl Scanner {
         }
     }
 
-    pub fn scan_tokens(&mut self) {
-        while !self.is_at_end() {
-            self.start = self.current;
-            print!("{:?} ", self.scan_token());
+    fn scan_token(&mut self) -> Option<TokenType> {
+        if self.is_at_end() {
+            return None;
         }
-    }
 
-    fn scan_token(&mut self) -> Token {
         self.skip_whitespace();
 
+        self.start = self.current;
+
         match self.advance() {
-            '(' => self.make_token(TokenType::LeftParen),
-            ')' => self.make_token(TokenType::RightParen),
-            '{' => self.make_token(TokenType::LeftBrace),
-            '}' => self.make_token(TokenType::RightBrace),
-            ',' => self.make_token(TokenType::Comma),
-            '.' => self.make_token(TokenType::Dot),
-            '-' => self.make_token(TokenType::Minus),
-            '+' => self.make_token(TokenType::Plus),
-            ';' => self.make_token(TokenType::Semicolon),
-            '*' => self.make_token(TokenType::Star),
+            '(' => Some(TokenType::LeftParen),
+            ')' => Some(TokenType::RightParen),
+            '{' => Some(TokenType::LeftBrace),
+            '}' => Some(TokenType::RightBrace),
+            ',' => Some(TokenType::Comma),
+            '.' => Some(TokenType::Dot),
+            '-' => Some(TokenType::Minus),
+            '+' => Some(TokenType::Plus),
+            ';' => Some(TokenType::Semicolon),
+            '*' => Some(TokenType::Star),
             '!' => {
                 if self.match_expected('=') {
-                    self.make_token(TokenType::BangEqual)
+                    Some(TokenType::BangEqual)
                 } else {
-                    self.make_token(TokenType::Bang)
+                    Some(TokenType::Bang)
                 }
             }
             '=' => {
                 if self.match_expected('=') {
-                    self.make_token(TokenType::EqualEqual)
+                    Some(TokenType::EqualEqual)
                 } else {
-                    self.make_token(TokenType::Equal)
+                    Some(TokenType::Equal)
                 }
             }
             '<' => {
                 if self.match_expected('=') {
-                    self.make_token(TokenType::LessEqual)
+                    Some(TokenType::LessEqual)
                 } else {
-                    self.make_token(TokenType::Less)
+                    Some(TokenType::Less)
                 }
             }
             '>' => {
                 if self.match_expected('=') {
-                    self.make_token(TokenType::GreaterEqual)
+                    Some(TokenType::GreaterEqual)
                 } else {
-                    self.make_token(TokenType::Greater)
+                    Some(TokenType::Greater)
                 }
             }
             '\n' => {
@@ -76,14 +75,14 @@ impl Scanner {
                     }
                     self.scan_token()
                 } else {
-                    self.make_token(TokenType::Error)
+                    Some(TokenType::Error)
                 }
             }
-            '"' => self.scan_string(),
-            c if c.is_digit(10) => self.scan_number(),
-            c if self.is_id_start(c) => self.scan_identifier(),
-            '\0' => self.make_token(TokenType::Eof),
-            _ => self.make_token(TokenType::Error),
+            '"' => Some(self.scan_string()),
+            c if c.is_digit(10) => Some(self.scan_number()),
+            c if self.is_id_start(c) => Some(self.scan_identifier()),
+            '\0' => None,
+            _ => Some(TokenType::Error),
         }
     }
 
@@ -95,7 +94,7 @@ impl Scanner {
         self.is_id_start(c) || c.is_digit(10)
     }
 
-    fn scan_identifier(&mut self) -> Token {
+    fn scan_identifier(&mut self) -> TokenType {
         let keywords = [
             ("and", TokenType::And),
             ("class", TokenType::Class),
@@ -127,14 +126,14 @@ impl Scanner {
 
         for (keyword, token_type) in keywords.iter() {
             if text == *keyword {
-                return self.make_token(*token_type);
+                return *token_type;
             }
         }
 
-        self.make_token(TokenType::Identifier)
+        TokenType::Identifier
     }
 
-    fn scan_number(&mut self) -> Token {
+    fn scan_number(&mut self) -> TokenType {
         loop {
             if !self.peek().is_digit(10) {
                 break;
@@ -155,10 +154,10 @@ impl Scanner {
             }
         }
 
-        self.make_token(TokenType::Number)
+        TokenType::Number
     }
 
-    fn scan_string(&mut self) -> Token {
+    fn scan_string(&mut self) -> TokenType {
         loop {
             if self.peek() == '"' {
                 break;
@@ -172,12 +171,12 @@ impl Scanner {
         }
 
         if self.is_at_end() {
-            return self.make_token(TokenType::Error);
+            return TokenType::Error;
         }
 
         self.advance();
 
-        self.make_token(TokenType::String)
+        TokenType::String
     }
 
     fn skip_whitespace(&mut self) {
@@ -245,8 +244,17 @@ impl Scanner {
     }
 }
 
+impl<'a> Iterator for Scanner<'a> {
+    type Item = Token;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.scan_token()
+            .map(|token_type| self.make_token(token_type))
+    }
+}
+
 #[derive(Copy, Debug)]
-enum TokenType {
+pub enum TokenType {
     LeftParen,
     RightParen,
     LeftBrace,
@@ -285,7 +293,6 @@ enum TokenType {
     Var,
     While,
     Error,
-    Eof,
 }
 
 impl Clone for TokenType {
@@ -295,7 +302,7 @@ impl Clone for TokenType {
 }
 
 #[derive(Debug)]
-struct Token {
+pub struct Token {
     token_type: TokenType,
     start: usize,
     length: usize,
