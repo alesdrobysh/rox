@@ -1,72 +1,80 @@
 mod chunk;
+mod compiler;
+mod scanner;
 mod vm;
 
-use chunk::{Chunk, Instruction, OpCode};
+use std::io::{Read, Write};
+use std::{env, fs, io, process};
+
+use compiler::compile;
+use vm::{InterpretError, InterpretResult};
 
 fn main() {
-    let mut chunk = Chunk::new(Vec::new());
+    let args: Vec<String> = env::args().collect();
 
-    // (- (1.2 + 3.4) / 5.6) * 7.8 - 9.0
+    if args.len() == 1 {
+        repl();
+    } else if args.len() == 2 {
+        match run_file(&args[1]) {
+            Ok(_) => {}
+            Err(InterpretError::CompileError(e)) => {
+                eprintln!("Compile error: {}", e);
+                process::exit(65);
+            }
+            Err(InterpretError::RuntimeError(e)) => {
+                eprintln!("Runtime error: {}", e);
+                process::exit(70);
+            }
+        }
+    } else {
+        eprintln!("Usage: rox [path]");
+        process::exit(64);
+    }
+}
 
-    chunk.push(Instruction {
-        op_code: OpCode::Constant(1.2),
-        line: 1,
-    });
+fn repl() {
+    println!("Welcome to Lox RELP!");
 
-    chunk.push(Instruction {
-        op_code: OpCode::Constant(3.4),
-        line: 1,
-    });
+    loop {
+        print!("> ");
+        io::stdout().flush().expect("Failed to flush stdout");
 
-    chunk.push(Instruction {
-        op_code: OpCode::Add,
-        line: 1,
-    });
+        let mut input = String::new();
+        match io::stdin()
+            .read_line(&mut input)
+            .map(|_| run(input))
+            .or_else(|_| {
+                Err(InterpretError::RuntimeError(
+                    "Failed to read input".to_string(),
+                ))
+            }) {
+            Ok(_) => {}
+            Err(InterpretError::CompileError(e)) => {
+                eprintln!("Compile error: {}", e);
+            }
+            Err(InterpretError::RuntimeError(e)) => {
+                eprintln!("Runtime error: {}", e);
+            }
+        }
+    }
+}
 
-    chunk.push(Instruction {
-        op_code: OpCode::Constant(5.6),
-        line: 1,
-    });
+fn run_file(path: &str) -> InterpretResult {
+    match fs::File::open(path) {
+        Ok(mut file) => {
+            let mut contents = String::new();
+            file.read_to_string(&mut contents)
+                .expect("Failed to read file");
+            run(contents)
+        }
+        Err(e) => {
+            eprintln!("Error opening file: {}", e);
+            process::exit(1);
+        }
+    }
+}
 
-    chunk.push(Instruction {
-        op_code: OpCode::Divide,
-        line: 1,
-    });
-
-    chunk.push(Instruction {
-        op_code: OpCode::Negate,
-        line: 1,
-    });
-
-    chunk.push(Instruction {
-        op_code: OpCode::Constant(7.8),
-        line: 1,
-    });
-
-    chunk.push(Instruction {
-        op_code: OpCode::Multiply,
-        line: 1,
-    });
-
-    chunk.push(Instruction {
-        op_code: OpCode::Constant(9.0),
-        line: 2,
-    });
-
-    chunk.push(Instruction {
-        op_code: OpCode::Subtract,
-        line: 2,
-    });
-
-    chunk.push(Instruction {
-        op_code: OpCode::Return,
-        line: 2,
-    });
-
-    let mut vm = vm::VM::new(chunk);
-
-    match vm.interpret() {
-        Ok(_) => println!("Interpretation successful"),
-        Err(e) => println!("Interpretation failed: {}", e),
-    };
+fn run(source: String) -> InterpretResult {
+    compile(source);
+    Ok(())
 }

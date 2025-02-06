@@ -1,7 +1,11 @@
 use crate::chunk::{print_instruction, Chunk, OpCode, Value};
 use std::env;
 
-pub type InterpretResult = Result<(), String>;
+pub enum InterpretError {
+    CompileError(String),
+    RuntimeError(String),
+}
+pub type InterpretResult = Result<(), InterpretError>;
 
 pub struct VM {
     pub chunk: Chunk,
@@ -22,7 +26,11 @@ impl VM {
 
             match instruction {
                 Some(_) => {}
-                None => return Err("No more instructions".to_string()),
+                None => {
+                    return Err(InterpretError::RuntimeError(
+                        "No more instructions".to_string(),
+                    ))
+                }
             }
 
             let instruction = instruction.unwrap();
@@ -43,23 +51,43 @@ impl VM {
                 }
                 OpCode::Negate => match self.stack.pop() {
                     Some(value) => self.stack.push(-value),
-                    None => return Err("No value to negate".to_string()),
+                    None => {
+                        return Err(InterpretError::RuntimeError(
+                            "Not enough values to negate".to_string(),
+                        ))
+                    }
                 },
                 OpCode::Add => match (self.stack.pop(), self.stack.pop()) {
                     (Some(a), Some(b)) => self.stack.push(a + b),
-                    _ => return Err("Not enough values to add".to_string()),
+                    _ => {
+                        return Err(InterpretError::RuntimeError(
+                            "Not enough values to add".to_string(),
+                        ))
+                    }
                 },
                 OpCode::Subtract => match (self.stack.pop(), self.stack.pop()) {
                     (Some(a), Some(b)) => self.stack.push(b - a),
-                    _ => return Err("Not enough values to subtract".to_string()),
+                    _ => {
+                        return Err(InterpretError::RuntimeError(
+                            "Not enough values to subtract".to_string(),
+                        ))
+                    }
                 },
                 OpCode::Multiply => match (self.stack.pop(), self.stack.pop()) {
                     (Some(a), Some(b)) => self.stack.push(a * b),
-                    _ => return Err("Not enough values to multiply".to_string()),
+                    _ => {
+                        return Err(InterpretError::RuntimeError(
+                            "Not enough values to multiply".to_string(),
+                        ))
+                    }
                 },
                 OpCode::Divide => match (self.stack.pop(), self.stack.pop()) {
                     (Some(a), Some(b)) => self.stack.push(b / a),
-                    _ => return Err("Not enough values to divide".to_string()),
+                    _ => {
+                        return Err(InterpretError::RuntimeError(
+                            "Not enough values to divide".to_string(),
+                        ))
+                    }
                 },
             }
         }
