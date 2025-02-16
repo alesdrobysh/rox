@@ -1,19 +1,19 @@
-use crate::chunk::{print_instruction, Chunk, OpCode, Value};
-use std::env;
+use crate::chunk::{Chunk, OpCode, Value};
 
+#[derive(Debug)]
 pub enum InterpretError {
     CompileError(String),
     RuntimeError(String),
 }
 pub type InterpretResult = Result<(), InterpretError>;
 
-pub struct VM {
-    pub chunk: Chunk,
+pub struct VM<'a> {
+    pub chunk: &'a mut Chunk,
     pub stack: Vec<Value>,
 }
 
-impl VM {
-    pub fn new(chunk: Chunk) -> VM {
+impl<'a> VM<'a> {
+    pub fn new(chunk: &'a mut Chunk) -> VM<'a> {
         VM {
             chunk,
             stack: Vec::new(),
@@ -21,31 +21,25 @@ impl VM {
     }
 
     pub fn interpret(&mut self) -> InterpretResult {
+        self.run()
+    }
+
+    fn run(&mut self) -> InterpretResult {
         loop {
-            let instruction = &self.chunk.next_instruction();
-
-            match instruction {
-                Some(_) => {}
-                None => {
-                    return Err(InterpretError::RuntimeError(
-                        "No more instructions".to_string(),
-                    ))
-                }
-            }
-
-            let instruction = instruction.unwrap();
-
-            match env::var("DEBUG") {
-                Ok(_) => {
-                    println!("");
-                    self.stack.iter().for_each(|v| println!("[{}]", v));
-                    print_instruction(instruction);
-                }
-                Err(_) => {}
-            }
+            let instruction = self
+                .chunk
+                .next_instruction()
+                .ok_or(InterpretError::RuntimeError(
+                    "No more instructions".to_string(),
+                ))?;
 
             match instruction.op_code {
-                OpCode::Return => return Ok(()),
+                OpCode::Return => {
+                    return {
+                        println!("{:?}", self.stack);
+                        Ok(())
+                    }
+                }
                 OpCode::Constant(value) => {
                     self.stack.push(value);
                 }

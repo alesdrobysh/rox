@@ -1,8 +1,11 @@
+use crate::logger;
+
 pub struct Scanner<'a> {
     source: &'a str,
     start: usize,
     current: usize,
     line: usize,
+    eof_emitted: bool,
 }
 
 impl<'a> Scanner<'a> {
@@ -12,11 +15,17 @@ impl<'a> Scanner<'a> {
             start: 0,
             current: 0,
             line: 1,
+            eof_emitted: false,
         }
     }
 
     fn scan_token(&mut self) -> Option<TokenType> {
         if self.is_at_end() {
+            if !self.eof_emitted {
+                self.eof_emitted = true;
+                return Some(TokenType::Eof);
+            }
+
             return None;
         }
 
@@ -75,7 +84,7 @@ impl<'a> Scanner<'a> {
                     }
                     self.scan_token()
                 } else {
-                    Some(TokenType::Error)
+                    Some(TokenType::Slash)
                 }
             }
             '"' => Some(self.scan_string()),
@@ -223,9 +232,11 @@ impl<'a> Scanner<'a> {
     }
 
     fn advance(&mut self) -> char {
-        self.current += 1;
-        match self.source.chars().nth(self.current - 1) {
-            Some(c) => c,
+        match self.source.chars().nth(self.current) {
+            Some(c) => {
+                self.current += 1;
+                c
+            }
             None => '\0',
         }
     }
@@ -234,18 +245,27 @@ impl<'a> Scanner<'a> {
         self.current >= self.source.len()
     }
 
-    fn make_token(&self, token_type: TokenType) -> Token {
+    fn make_token(&self, token_type: TokenType) -> Token<'a> {
+        if self.start > self.source.len() || self.current > self.source.len() {
+            logger::debug(&format!(
+                "Invalid slice range: start={}, current={}, len={}, token_type={:?}",
+                self.start,
+                self.current,
+                self.source.len(),
+                token_type
+            ));
+        }
+
         Token {
             token_type,
-            start: self.start,
-            length: self.current - self.start,
+            lexeme: &self.source[self.start..self.current],
             line: self.line,
         }
     }
 }
 
 impl<'a> Iterator for Scanner<'a> {
-    type Item = Token;
+    type Item = Token<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.scan_token()
@@ -253,7 +273,7 @@ impl<'a> Iterator for Scanner<'a> {
     }
 }
 
-#[derive(Copy, Debug)]
+#[derive(Copy, Debug, PartialEq)]
 pub enum TokenType {
     LeftParen,
     RightParen,
@@ -265,6 +285,7 @@ pub enum TokenType {
     Plus,
     Semicolon,
     Star,
+    Slash,
     Bang,
     BangEqual,
     Equal,
@@ -293,6 +314,7 @@ pub enum TokenType {
     Var,
     While,
     Error,
+    Eof,
 }
 
 impl Clone for TokenType {
@@ -301,10 +323,19 @@ impl Clone for TokenType {
     }
 }
 
-#[derive(Debug)]
-pub struct Token {
-    token_type: TokenType,
-    start: usize,
-    length: usize,
-    line: usize,
+#[derive(Debug, Copy)]
+pub struct Token<'a> {
+    pub token_type: TokenType,
+    pub lexeme: &'a str,
+    pub line: usize,
+}
+
+impl<'a> Clone for Token<'a> {
+    fn clone(&self) -> Token<'a> {
+        Token {
+            token_type: self.token_type.clone(),
+            lexeme: self.lexeme,
+            line: self.line,
+        }
+    }
 }

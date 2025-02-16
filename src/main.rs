@@ -1,12 +1,14 @@
 mod chunk;
 mod compiler;
+mod logger;
+mod parser;
 mod scanner;
 mod vm;
 
 use std::io::{Read, Write};
 use std::{env, fs, io, process};
 
-use compiler::compile;
+use compiler::Compiler;
 use vm::{InterpretError, InterpretResult};
 
 fn main() {
@@ -33,22 +35,19 @@ fn main() {
 }
 
 fn repl() {
-    println!("Welcome to Lox RELP!");
+    println!("Welcome to Lox REPL!");
 
     loop {
         print!("> ");
         io::stdout().flush().expect("Failed to flush stdout");
 
         let mut input = String::new();
-        match io::stdin()
+        io::stdin()
             .read_line(&mut input)
-            .map(|_| run(input))
-            .or_else(|_| {
-                Err(InterpretError::RuntimeError(
-                    "Failed to read input".to_string(),
-                ))
-            }) {
-            Ok(_) => {}
+            .expect("Failed to read line");
+
+        match run(input) {
+            Ok(()) => {}
             Err(InterpretError::CompileError(e)) => {
                 eprintln!("Compile error: {}", e);
             }
@@ -75,6 +74,10 @@ fn run_file(path: &str) -> InterpretResult {
 }
 
 fn run(source: String) -> InterpretResult {
-    compile(source);
-    Ok(())
+    let mut compiler = Compiler::new(&source);
+    let chunk = compiler
+        .compile()
+        .map_err(|error| InterpretError::CompileError(error))?;
+
+    vm::VM::new(chunk).interpret()
 }

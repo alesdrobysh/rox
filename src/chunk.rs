@@ -1,6 +1,6 @@
 pub type Value = f64;
 
-#[derive(Copy)]
+#[derive(Copy, Debug)]
 pub enum OpCode {
     Return,
     Constant(Value),
@@ -20,7 +20,35 @@ impl Clone for OpCode {
 #[derive(Copy)]
 pub struct Instruction {
     pub op_code: OpCode,
-    pub line: u32,
+    pub line: usize,
+}
+
+impl Instruction {
+    pub fn to_string(&self) -> String {
+        match self.op_code {
+            OpCode::Return => {
+                return format!("{:4} RETURN", self.line);
+            }
+            OpCode::Constant(value) => {
+                return format!("{:4} CONSTANT {}", self.line, value);
+            }
+            OpCode::Negate => {
+                return format!("{:4} NEGATE", self.line);
+            }
+            OpCode::Add => {
+                return format!("{:4} ADD", self.line);
+            }
+            OpCode::Subtract => {
+                return format!("{:4} SUBTRACT", self.line);
+            }
+            OpCode::Multiply => {
+                return format!("{:4} MULTIPLY", self.line);
+            }
+            OpCode::Divide => {
+                return format!("{:4} DIVIDE", self.line);
+            }
+        }
+    }
 }
 
 impl Clone for Instruction {
@@ -35,15 +63,26 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn new(instructions: Vec<Instruction>) -> Chunk {
+    pub fn new() -> Chunk {
         Chunk {
-            instructions,
+            instructions: Vec::new(),
             ip: 0,
         }
     }
 
     pub fn push(&mut self, instruction: Instruction) {
         self.instructions.push(instruction);
+    }
+
+    pub fn disassemble(&self, name: &str) -> String {
+        let mut result = String::from(format!("== {} ==\n", name));
+
+        for instruction in self.instructions.iter() {
+            result.push_str(&instruction.to_string());
+            result.push_str("\n");
+        }
+
+        result
     }
 
     pub fn next_instruction(&mut self) -> Option<Instruction> {
@@ -53,32 +92,6 @@ impl Chunk {
             Some(instruction)
         } else {
             None
-        }
-    }
-}
-
-pub fn print_instruction(instruction: Instruction) {
-    match instruction.op_code {
-        OpCode::Return => {
-            println!("{:4} RETURN", instruction.line);
-        }
-        OpCode::Constant(value) => {
-            println!("{:4} CONSTANT {}", instruction.line, value);
-        }
-        OpCode::Negate => {
-            println!("{:4} NEGATE", instruction.line);
-        }
-        OpCode::Add => {
-            println!("{:4} ADD", instruction.line);
-        }
-        OpCode::Subtract => {
-            println!("{:4} SUBTRACT", instruction.line);
-        }
-        OpCode::Multiply => {
-            println!("{:4} MULTIPLY", instruction.line);
-        }
-        OpCode::Divide => {
-            println!("{:4} DIVIDE", instruction.line);
         }
     }
 }

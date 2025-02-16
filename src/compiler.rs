@@ -1,9 +1,54 @@
-use crate::scanner::Scanner;
+use crate::chunk::{self, Chunk};
+use crate::logger;
+use crate::parser::Parser;
+use crate::scanner::{self, Scanner};
 
-pub fn compile(source: String) {
-    let scanner = Scanner::new(&source);
+pub struct Compiler<'a> {
+    compiling_chunk: Chunk,
+    parser: Parser<'a>,
+}
 
-    for token in scanner {
-        println!("{:?}", token);
+impl<'a> Compiler<'a> {
+    pub fn new(source: &'a str) -> Compiler<'a> {
+        let scanner = Scanner::new(source);
+
+        Compiler {
+            parser: Parser::new(scanner),
+            compiling_chunk: Chunk::new(),
+        }
+    }
+
+    pub fn compile(&mut self) -> Result<&mut Chunk, String> {
+        for instruction in self.parser.expression()? {
+            self.emit_byte(instruction)?;
+        }
+
+        self.parser
+            .consume(scanner::TokenType::Eof, "Expected end of expression")?;
+
+        self.emit_return()?;
+
+        logger::info(&self.compiling_chunk.disassemble("code"));
+
+        Ok(self.current_chunk())
+    }
+
+    fn current_chunk(&mut self) -> &mut Chunk {
+        &mut self.compiling_chunk
+    }
+
+    fn emit_byte(&mut self, byte: chunk::OpCode) -> Result<(), String> {
+        let line = self.parser.previous.ok_or("Expected token")?.line;
+
+        self.current_chunk().push(chunk::Instruction {
+            op_code: byte,
+            line,
+        });
+
+        Ok(())
+    }
+
+    fn emit_return(&mut self) -> Result<(), String> {
+        self.emit_byte(chunk::OpCode::Return)
     }
 }
