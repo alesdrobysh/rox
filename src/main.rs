@@ -3,6 +3,7 @@ mod compiler;
 mod logger;
 mod parser;
 mod scanner;
+mod value;
 mod vm;
 
 use std::io::{Read, Write};
@@ -23,8 +24,8 @@ fn main() {
                 eprintln!("Compile error: {}", e);
                 process::exit(65);
             }
-            Err(InterpretError::RuntimeError(e)) => {
-                eprintln!("Runtime error: {}", e);
+            Err(InterpretError::RuntimeError(message, line)) => {
+                eprintln!("Runtime error at line {}: {}", line, message);
                 process::exit(70);
             }
         }
@@ -51,8 +52,8 @@ fn repl() {
             Err(InterpretError::CompileError(e)) => {
                 eprintln!("Compile error: {}", e);
             }
-            Err(InterpretError::RuntimeError(e)) => {
-                eprintln!("Runtime error: {}", e);
+            Err(InterpretError::RuntimeError(message, line)) => {
+                eprintln!("Runtime error at line {}: {}", line, message);
             }
         }
     }

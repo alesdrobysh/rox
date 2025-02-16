@@ -2,6 +2,7 @@ use crate::{
     chunk::OpCode,
     logger,
     scanner::{Scanner, Token, TokenType},
+    value::Value,
 };
 
 pub struct Parser<'a> {
@@ -142,36 +143,60 @@ impl<'a> Parser<'a> {
     }
 
     fn get_rule(&self, operator: TokenType) -> ParseRule {
+        let grouping = Box::new(|parser: &mut Parser| parser.grouping());
+        let unary = Box::new(|parser: &mut Parser| parser.unary());
+        let binary = Box::new(|parser: &mut Parser| parser.binary());
+        let number = Box::new(|parser: &mut Parser| parser.number());
+        let literal = Box::new(|parser: &mut Parser| parser.literal());
+
         match operator {
             TokenType::LeftParen => ParseRule {
-                prefix: Some(Box::new(|parser: &mut Parser| parser.grouping())),
+                prefix: Some(grouping),
                 infix: None,
                 precedence: Precedence::None,
             },
             TokenType::Minus => ParseRule {
-                prefix: Some(Box::new(|parser: &mut Parser| parser.unary())),
-                infix: Some(Box::new(|parser: &mut Parser| parser.binary())),
+                prefix: Some(unary),
+                infix: Some(binary),
                 precedence: Precedence::Term,
             },
             TokenType::Plus => ParseRule {
                 prefix: None,
-                infix: Some(Box::new(|parser: &mut Parser| parser.binary())),
+                infix: Some(binary),
                 precedence: Precedence::Term,
             },
-            TokenType::Slash => ParseRule {
+            TokenType::Star | TokenType::Slash => ParseRule {
                 prefix: None,
-                infix: Some(Box::new(|parser: &mut Parser| parser.binary())),
-                precedence: Precedence::Factor,
-            },
-            TokenType::Star => ParseRule {
-                prefix: None,
-                infix: Some(Box::new(|parser: &mut Parser| parser.binary())),
+                infix: Some(binary),
                 precedence: Precedence::Factor,
             },
             TokenType::Number => ParseRule {
-                prefix: Some(Box::new(|parser: &mut Parser| parser.number())),
+                prefix: Some(number),
                 infix: None,
                 precedence: Precedence::None,
+            },
+            TokenType::True | TokenType::False | TokenType::Nil => ParseRule {
+                prefix: Some(literal),
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Bang => ParseRule {
+                prefix: Some(unary),
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::EqualEqual | TokenType::BangEqual => ParseRule {
+                prefix: None,
+                infix: Some(binary),
+                precedence: Precedence::Equality,
+            },
+            TokenType::Greater
+            | TokenType::GreaterEqual
+            | TokenType::Less
+            | TokenType::LessEqual => ParseRule {
+                prefix: None,
+                infix: Some(binary),
+                precedence: Precedence::Comparison,
             },
             _ => ParseRule {
                 prefix: None,
@@ -212,6 +237,21 @@ impl<'a> Parser<'a> {
             TokenType::Minus => operations.push(OpCode::Subtract),
             TokenType::Star => operations.push(OpCode::Multiply),
             TokenType::Slash => operations.push(OpCode::Divide),
+            TokenType::EqualEqual => operations.push(OpCode::Equal),
+            TokenType::BangEqual => {
+                operations.push(OpCode::Equal);
+                operations.push(OpCode::Not);
+            }
+            TokenType::Greater => operations.push(OpCode::Greater),
+            TokenType::GreaterEqual => {
+                operations.push(OpCode::Less);
+                operations.push(OpCode::Not);
+            }
+            TokenType::Less => operations.push(OpCode::Less),
+            TokenType::LessEqual => {
+                operations.push(OpCode::Greater);
+                operations.push(OpCode::Not);
+            }
             _ => {
                 return Err(format!("Unexpected binary operator type: {:?}", token_type));
             }
@@ -231,6 +271,7 @@ impl<'a> Parser<'a> {
 
         match previous.token_type {
             TokenType::Minus => operations.push(OpCode::Negate),
+            TokenType::Bang => operations.push(OpCode::Not),
             _ => {
                 return Err(format!(
                     "Unexpected unary operator type: {:?}",
@@ -249,8 +290,25 @@ impl<'a> Parser<'a> {
             .ok_or("Expected number when parsing number, found nothing")?
             .lexeme
             .parse::<f64>()
-            .map(|value| vec![OpCode::Constant(value)])
+            .map(|value| vec![OpCode::Constant(Value::Number(value))])
             .map_err(|e| e.to_string())
+    }
+
+    fn literal(&mut self) -> Result<Vec<OpCode>, String> {
+        logger::debug("literal");
+
+        let previous = self.previous.ok_or("Expected literal, found nothing")?;
+
+        match previous.token_type {
+            TokenType::True | TokenType::False => Ok(vec![OpCode::Constant(Value::Bool(
+                previous.token_type == TokenType::True,
+            ))]),
+            TokenType::Nil => Ok(vec![OpCode::Constant(Value::Nil)]),
+            _ => Err(format!(
+                "Unexpected literal type: {:?}",
+                previous.token_type
+            )),
+        }
     }
 
     fn error_at(&mut self, token: &Token<'a>, message: &str) -> Result<(), String> {

@@ -1,4 +1,4 @@
-pub type Value = f64;
+use crate::value::Value;
 
 #[derive(Copy, Debug)]
 pub enum OpCode {
@@ -9,6 +9,10 @@ pub enum OpCode {
     Subtract,
     Multiply,
     Divide,
+    Not,
+    Equal,
+    Greater,
+    Less,
 }
 
 impl Clone for OpCode {
@@ -17,7 +21,7 @@ impl Clone for OpCode {
     }
 }
 
-#[derive(Copy)]
+#[derive(Copy, Clone)]
 pub struct Instruction {
     pub op_code: OpCode,
     pub line: usize,
@@ -30,7 +34,7 @@ impl Instruction {
                 return format!("{:4} RETURN", self.line);
             }
             OpCode::Constant(value) => {
-                return format!("{:4} CONSTANT {}", self.line, value);
+                return format!("{:4} CONSTANT {:?}", self.line, value);
             }
             OpCode::Negate => {
                 return format!("{:4} NEGATE", self.line);
@@ -47,13 +51,19 @@ impl Instruction {
             OpCode::Divide => {
                 return format!("{:4} DIVIDE", self.line);
             }
+            OpCode::Not => {
+                return format!("{:4} NOT", self.line);
+            }
+            OpCode::Equal => {
+                return format!("{:4} EQUAL", self.line);
+            }
+            OpCode::Greater => {
+                return format!("{:4} GREATER", self.line);
+            }
+            OpCode::Less => {
+                return format!("{:4} LESS", self.line);
+            }
         }
-    }
-}
-
-impl Clone for Instruction {
-    fn clone(&self) -> Instruction {
-        *self
     }
 }
 

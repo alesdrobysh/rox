@@ -1,9 +1,10 @@
-use crate::chunk::{Chunk, OpCode, Value};
+use crate::chunk::{Chunk, OpCode};
+use crate::value::Value;
 
 #[derive(Debug)]
 pub enum InterpretError {
     CompileError(String),
-    RuntimeError(String),
+    RuntimeError(String, usize),
 }
 pub type InterpretResult = Result<(), InterpretError>;
 
@@ -31,8 +32,10 @@ impl<'a> VM<'a> {
                 .next_instruction()
                 .ok_or(InterpretError::RuntimeError(
                     "No more instructions".to_string(),
+                    0,
                 ))?;
 
+            let line = instruction.line;
             match instruction.op_code {
                 OpCode::Return => {
                     return {
@@ -44,46 +47,88 @@ impl<'a> VM<'a> {
                     self.stack.push(value);
                 }
                 OpCode::Negate => match self.stack.pop() {
-                    Some(value) => self.stack.push(-value),
+                    Some(Value::Number(value)) => self.stack.push(Value::Number(-value)),
+                    Some(_) => {
+                        return Err(InterpretError::RuntimeError(
+                            "Cannot negate non-number value".to_string(),
+                            line,
+                        ))
+                    }
                     None => {
                         return Err(InterpretError::RuntimeError(
                             "Not enough values to negate".to_string(),
+                            line,
                         ))
                     }
                 },
-                OpCode::Add => match (self.stack.pop(), self.stack.pop()) {
-                    (Some(a), Some(b)) => self.stack.push(a + b),
+                OpCode::Add => self.binary_op(|a, b| Ok(Value::Number(a + b)), line)?,
+                OpCode::Subtract => self.binary_op(|a, b| Ok(Value::Number(a - b)), line)?,
+                OpCode::Multiply => self.binary_op(|a, b| Ok(Value::Number(a * b)), line)?,
+                OpCode::Divide => self.binary_op(
+                    |a, b| {
+                        if b == 0.0 {
+                            return Err(InterpretError::RuntimeError(
+                                "Division by zero".to_string(),
+                                line,
+                            ));
+                        }
+
+                        Ok(Value::Number(a / b))
+                    },
+                    line,
+                )?,
+                OpCode::Not => {
+                    let value = self.stack.pop().ok_or(InterpretError::RuntimeError(
+                        "Not enough values to negate".to_string(),
+                        line,
+                    ))?;
+
+                    self.stack.push(Value::Bool(value.is_falsey()));
+                }
+                OpCode::Equal => match (self.stack.pop(), self.stack.pop()) {
+                    (Some(Value::Number(a)), Some(Value::Number(b))) => {
+                        self.stack.push(Value::Bool(a == b));
+                    }
+                    (Some(Value::Bool(a)), Some(Value::Bool(b))) => {
+                        self.stack.push(Value::Bool(a == b));
+                    }
+                    (Some(Value::Nil), Some(Value::Nil)) => {
+                        self.stack.push(Value::Bool(true));
+                    }
+                    (Some(_), Some(_)) => {
+                        self.stack.push(Value::Bool(false));
+                    }
                     _ => {
                         return Err(InterpretError::RuntimeError(
-                            "Not enough values to add".to_string(),
-                        ))
+                            "Not enough values to compare".to_string(),
+                            line,
+                        ));
                     }
                 },
-                OpCode::Subtract => match (self.stack.pop(), self.stack.pop()) {
-                    (Some(a), Some(b)) => self.stack.push(b - a),
-                    _ => {
-                        return Err(InterpretError::RuntimeError(
-                            "Not enough values to subtract".to_string(),
-                        ))
-                    }
-                },
-                OpCode::Multiply => match (self.stack.pop(), self.stack.pop()) {
-                    (Some(a), Some(b)) => self.stack.push(a * b),
-                    _ => {
-                        return Err(InterpretError::RuntimeError(
-                            "Not enough values to multiply".to_string(),
-                        ))
-                    }
-                },
-                OpCode::Divide => match (self.stack.pop(), self.stack.pop()) {
-                    (Some(a), Some(b)) => self.stack.push(b / a),
-                    _ => {
-                        return Err(InterpretError::RuntimeError(
-                            "Not enough values to divide".to_string(),
-                        ))
-                    }
-                },
+                OpCode::Greater => self.binary_op(|a, b| Ok(Value::Bool(a > b)), line)?,
+                OpCode::Less => self.binary_op(|a, b| Ok(Value::Bool(a < b)), line)?,
             }
+        }
+    }
+
+    fn binary_op<F>(&mut self, op: F, line: usize) -> InterpretResult
+    where
+        F: Fn(f64, f64) -> Result<Value, InterpretError>,
+    {
+        match (self.stack.pop(), self.stack.pop()) {
+            (Some(Value::Number(a)), Some(Value::Number(b))) => {
+                let result = op(a, b)?;
+                self.stack.push(result);
+                Ok(())
+            }
+            (Some(_), Some(_)) => Err(InterpretError::RuntimeError(
+                "Operands must be numbers".to_string(),
+                line,
+            )),
+            _ => Err(InterpretError::RuntimeError(
+                "Not enough operands".to_string(),
+                line,
+            )),
         }
     }
 }
