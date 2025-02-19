@@ -256,9 +256,15 @@ impl<'a> Scanner<'a> {
             ));
         }
 
+        let mut lexeme = &self.source[self.start..self.current];
+
+        if token_type == TokenType::String {
+            lexeme = &self.source[self.start + 1..self.current - 1];
+        }
+
         Token {
             token_type,
-            lexeme: &self.source[self.start..self.current],
+            lexeme,
             line: self.line,
         }
     }

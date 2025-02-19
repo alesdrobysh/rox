@@ -1,8 +1,9 @@
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Bool(bool),
     Number(f64),
     Nil,
+    String(String),
 }
 
 impl Value {

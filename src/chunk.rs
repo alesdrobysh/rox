@@ -1,9 +1,9 @@
 use crate::value::Value;
 
-#[derive(Copy, Debug)]
+#[derive(Debug)]
 pub enum OpCode {
     Return,
-    Constant(Value),
+    Value(Value),
     Negate,
     Add,
     Subtract,
@@ -17,11 +17,16 @@ pub enum OpCode {
 
 impl Clone for OpCode {
     fn clone(&self) -> OpCode {
-        *self
+        match self {
+            OpCode::Value(Value::String(string)) => OpCode::Value(Value::String(string.clone())),
+            OpCode::Value(Value::Number(number)) => OpCode::Value(Value::Number(*number)),
+            OpCode::Value(Value::Bool(boolean)) => OpCode::Value(Value::Bool(*boolean)),
+            rest => rest.clone(),
+        }
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct Instruction {
     pub op_code: OpCode,
     pub line: usize,
@@ -29,12 +34,12 @@ pub struct Instruction {
 
 impl Instruction {
     pub fn to_string(&self) -> String {
-        match self.op_code {
+        match &self.op_code {
             OpCode::Return => {
                 return format!("{:4} RETURN", self.line);
             }
-            OpCode::Constant(value) => {
-                return format!("{:4} CONSTANT {:?}", self.line, value);
+            OpCode::Value(value) => {
+                return format!("{:4} VALUE {:?}", self.line, value);
             }
             OpCode::Negate => {
                 return format!("{:4} NEGATE", self.line);
@@ -95,9 +100,9 @@ impl Chunk {
         result
     }
 
-    pub fn next_instruction(&mut self) -> Option<Instruction> {
+    pub fn next_instruction(&mut self) -> Option<&Instruction> {
         if self.ip < self.instructions.len() {
-            let instruction = self.instructions[self.ip];
+            let instruction = &self.instructions[self.ip];
             self.ip += 1;
             Some(instruction)
         } else {

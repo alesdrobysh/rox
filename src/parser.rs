@@ -175,7 +175,7 @@ impl<'a> Parser<'a> {
                 infix: None,
                 precedence: Precedence::None,
             },
-            TokenType::True | TokenType::False | TokenType::Nil => ParseRule {
+            TokenType::True | TokenType::False | TokenType::Nil | TokenType::String => ParseRule {
                 prefix: Some(literal),
                 infix: None,
                 precedence: Precedence::None,
@@ -290,7 +290,7 @@ impl<'a> Parser<'a> {
             .ok_or("Expected number when parsing number, found nothing")?
             .lexeme
             .parse::<f64>()
-            .map(|value| vec![OpCode::Constant(Value::Number(value))])
+            .map(|value| vec![OpCode::Value(Value::Number(value))])
             .map_err(|e| e.to_string())
     }
 
@@ -298,12 +298,14 @@ impl<'a> Parser<'a> {
         logger::debug("literal");
 
         let previous = self.previous.ok_or("Expected literal, found nothing")?;
+        let lexeme = previous.lexeme;
 
         match previous.token_type {
-            TokenType::True | TokenType::False => Ok(vec![OpCode::Constant(Value::Bool(
+            TokenType::True | TokenType::False => Ok(vec![OpCode::Value(Value::Bool(
                 previous.token_type == TokenType::True,
             ))]),
-            TokenType::Nil => Ok(vec![OpCode::Constant(Value::Nil)]),
+            TokenType::Nil => Ok(vec![OpCode::Value(Value::Nil)]),
+            TokenType::String => Ok(vec![OpCode::Value(Value::String(lexeme.to_string()))]),
             _ => Err(format!(
                 "Unexpected literal type: {:?}",
                 previous.token_type

@@ -36,15 +36,15 @@ impl<'a> VM<'a> {
                 ))?;
 
             let line = instruction.line;
-            match instruction.op_code {
+            match &instruction.op_code {
                 OpCode::Return => {
                     return {
                         println!("{:?}", self.stack);
                         Ok(())
                     }
                 }
-                OpCode::Constant(value) => {
-                    self.stack.push(value);
+                OpCode::Value(value) => {
+                    self.stack.push(value.clone());
                 }
                 OpCode::Negate => match self.stack.pop() {
                     Some(Value::Number(value)) => self.stack.push(Value::Number(-value)),
@@ -61,7 +61,26 @@ impl<'a> VM<'a> {
                         ))
                     }
                 },
-                OpCode::Add => self.binary_op(|a, b| Ok(Value::Number(a + b)), line)?,
+                OpCode::Add => match (self.stack.pop(), self.stack.pop()) {
+                    (Some(Value::Number(a)), Some(Value::Number(b))) => {
+                        self.stack.push(Value::Number(a + b));
+                    }
+                    (Some(Value::String(a)), Some(Value::String(b))) => {
+                        self.stack.push(Value::String(format!("{}{}", a, b)));
+                    }
+                    (Some(_), Some(_)) => {
+                        return Err(InterpretError::RuntimeError(
+                            "Operands must be numbers or strings".to_string(),
+                            line,
+                        ));
+                    }
+                    _ => {
+                        return Err(InterpretError::RuntimeError(
+                            "Not enough operands".to_string(),
+                            line,
+                        ));
+                    }
+                },
                 OpCode::Subtract => self.binary_op(|a, b| Ok(Value::Number(a - b)), line)?,
                 OpCode::Multiply => self.binary_op(|a, b| Ok(Value::Number(a * b)), line)?,
                 OpCode::Divide => self.binary_op(
@@ -94,6 +113,9 @@ impl<'a> VM<'a> {
                     }
                     (Some(Value::Nil), Some(Value::Nil)) => {
                         self.stack.push(Value::Bool(true));
+                    }
+                    (Some(Value::String(a)), Some(Value::String(b))) => {
+                        self.stack.push(Value::Bool(a == b));
                     }
                     (Some(_), Some(_)) => {
                         self.stack.push(Value::Bool(false));
