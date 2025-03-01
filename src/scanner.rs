@@ -74,11 +74,10 @@ impl<'a> Scanner<'a> {
             }
             '\n' => {
                 self.line += 1;
-                self.advance();
                 self.scan_token()
             }
             '/' => {
-                if self.peek_next() == '/' {
+                if self.match_expected('/') {
                     while self.peek() != '\n' && !self.is_at_end() {
                         self.advance();
                     }

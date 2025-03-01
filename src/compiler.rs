@@ -1,7 +1,7 @@
 use crate::chunk::{self, Chunk};
 use crate::logger;
 use crate::parser::Parser;
-use crate::scanner::{self, Scanner};
+use crate::scanner::Scanner;
 
 pub struct Compiler<'a> {
     compiling_chunk: Chunk,
@@ -19,12 +19,9 @@ impl<'a> Compiler<'a> {
     }
 
     pub fn compile(&mut self) -> Result<&mut Chunk, String> {
-        for instruction in self.parser.expression()? {
-            self.emit_byte(instruction)?;
-        }
+        let instructions = self.parser.parse()?;
 
-        self.parser
-            .consume(scanner::TokenType::Eof, "Expected end of expression")?;
+        self.current_chunk().extend(instructions);
 
         self.emit_return()?;
 
@@ -40,10 +37,8 @@ impl<'a> Compiler<'a> {
     fn emit_byte(&mut self, byte: chunk::OpCode) -> Result<(), String> {
         let line = self.parser.previous.ok_or("Expected token")?.line;
 
-        self.current_chunk().push(chunk::Instruction {
-            op_code: byte,
-            line,
-        });
+        self.current_chunk()
+            .push(chunk::Instruction::new(byte, line));
 
         Ok(())
     }

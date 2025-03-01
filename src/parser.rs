@@ -1,5 +1,5 @@
 use crate::{
-    chunk::OpCode,
+    chunk::{Instruction, OpCode},
     logger,
     scanner::{Scanner, Token, TokenType},
     value::Value,
@@ -9,7 +9,7 @@ pub struct Parser<'a> {
     scanner: Scanner<'a>,
     pub current: Option<Token<'a>>,
     pub previous: Option<Token<'a>>,
-    pub had_error: bool,
+    pub error: Option<String>,
     panic_mode: bool,
 }
 
@@ -20,16 +20,109 @@ impl<'a> Parser<'a> {
             scanner,
             current,
             previous: None,
-            had_error: false,
+            error: None,
             panic_mode: false,
         }
     }
 
-    pub fn expression(&mut self) -> Result<Vec<OpCode>, String> {
+    pub fn parse(&mut self) -> Result<Vec<Instruction>, String> {
+        let mut operations = Vec::new();
+
+        while !self.is_at_end() {
+            operations.extend(self.declaration()?);
+        }
+
+        self.consume(TokenType::Eof, "Expected end of file")?;
+
+        Ok(operations)
+    }
+
+    fn is_at_end(&self) -> bool {
+        self.current
+            .as_ref()
+            .map_or(true, |t| t.token_type == TokenType::Eof)
+    }
+
+    fn declaration(&mut self) -> Result<Vec<Instruction>, String> {
+        let result;
+
+        if self.match_token(TokenType::Var)? {
+            result = self.var_declaration();
+        } else {
+            result = self.statement();
+        }
+
+        if self.panic_mode {
+            self.syncronize()?;
+        }
+
+        result
+    }
+
+    fn var_declaration(&mut self) -> Result<Vec<Instruction>, String> {
+        logger::debug("var_declaration");
+
+        let identifier = self.consume(TokenType::Identifier, "Expect variable name")?;
+
+        let name = identifier.lexeme.to_string();
+        let line = identifier.line;
+
+        let mut operations = Vec::new();
+
+        if self.match_token(TokenType::Equal)? {
+            operations = self.expression()?;
+        } else {
+            operations.push(Instruction::new(OpCode::Value(Value::Nil), line));
+        }
+
+        self.consume(
+            TokenType::Semicolon,
+            "Expect ';' after variable declaration",
+        )?;
+
+        operations.push(Instruction::new(OpCode::DefineGlobal(name), line));
+
+        Ok(operations)
+    }
+
+    fn statement(&mut self) -> Result<Vec<Instruction>, String> {
+        if self.match_token(TokenType::Print)? {
+            return self.print_statement();
+        }
+
+        self.expression_statement()
+    }
+
+    fn print_statement(&mut self) -> Result<Vec<Instruction>, String> {
+        logger::debug("print_statement");
+
+        let mut operations = self.expression()?;
+        let line = self
+            .previous
+            .ok_or("Expected expression, found nothing")?
+            .line;
+        operations.push(Instruction::new(OpCode::Print, line));
+
+        self.consume(TokenType::Semicolon, "Expect ';' after value")?;
+
+        Ok(operations)
+    }
+
+    fn expression_statement(&mut self) -> Result<Vec<Instruction>, String> {
+        logger::debug("expression_statement");
+
+        let operations = self.expression()?;
+
+        self.consume(TokenType::Semicolon, "Expect ';' after expression")?;
+
+        Ok(operations)
+    }
+
+    fn expression(&mut self) -> Result<Vec<Instruction>, String> {
         self.parse_precedence(Precedence::Assignment)
     }
 
-    pub fn parse_precedence(&mut self, precedence: Precedence) -> Result<Vec<OpCode>, String> {
+    fn parse_precedence(&mut self, precedence: Precedence) -> Result<Vec<Instruction>, String> {
         logger::debug(&format!("parse_precedence: {:?}", precedence));
 
         self.advance()?;
@@ -48,7 +141,11 @@ impl<'a> Parser<'a> {
             previous.token_type
         ));
 
-        let mut operations = prefix(self)?;
+        let can_assign = !precedence.greater_than(Precedence::Assignment);
+        let mut operations = match prefix {
+            PrefixParseFn::ParseFn(f) => f(self)?,
+            PrefixParseFn::ParseFnCanAssign(f) => f(self, can_assign)?,
+        };
 
         loop {
             logger::debug(&format!(
@@ -85,32 +182,49 @@ impl<'a> Parser<'a> {
                     "Found infix operation for current token_type {:?}",
                     current.token_type
                 ));
-                let next_operations = infix.unwrap()(self)?;
-                operations.extend(next_operations);
+
+                match infix.unwrap() {
+                    InfixParseFn::ParseFn(f) => {
+                        operations.extend(f(self)?);
+                    }
+                }
             } else {
                 logger::debug(&format!("No infix rule found for {:?}", current.token_type));
             }
         }
 
+        if can_assign && self.match_token(TokenType::Equal)? {
+            return Err("Invalid assignment target.".to_string());
+        }
+
         Ok(operations)
     }
 
-    pub fn consume(&mut self, token_type: TokenType, message: &str) -> Result<(), String> {
+    fn consume(&mut self, token_type: TokenType, message: &str) -> Result<Token, String> {
         match self.current.clone() {
-            Some(token) if token.token_type == token_type => self.advance(),
-            Some(token) => self.error_at(&token, message),
-            None => self.error_at(
-                &Token {
-                    token_type: TokenType::Error,
-                    lexeme: "",
-                    line: 0,
-                },
-                "Unexpected end of file",
-            ),
+            Some(token) if token.token_type == token_type => {
+                self.advance()?;
+                Ok(token)
+            }
+            Some(token) => {
+                self.error_at(&token, message)?;
+                Err(message.to_string())
+            }
+            None => {
+                self.error_at(
+                    &Token {
+                        token_type: TokenType::Error,
+                        lexeme: "",
+                        line: 0,
+                    },
+                    "Unexpected end of file",
+                )?;
+                Err("Unexpected end of file".to_string())
+            }
         }
     }
 
-    pub fn advance(&mut self) -> Result<(), String> {
+    fn advance(&mut self) -> Result<(), String> {
         self.previous = self.current.take();
 
         loop {
@@ -135,10 +249,9 @@ impl<'a> Parser<'a> {
         logger::debug(&format!("  previous: {:?}", self.previous));
         logger::debug(&format!("  current: {:?}", self.current));
 
-        if self.had_error {
-            Err("Error".to_string())
-        } else {
-            Ok(())
+        match self.error {
+            Some(ref e) => Err(e.to_string()),
+            None => Ok(()),
         }
     }
 
@@ -148,46 +261,48 @@ impl<'a> Parser<'a> {
         let binary = Box::new(|parser: &mut Parser| parser.binary());
         let number = Box::new(|parser: &mut Parser| parser.number());
         let literal = Box::new(|parser: &mut Parser| parser.literal());
+        let variable =
+            Box::new(|parser: &mut Parser, can_assign: bool| parser.variable(can_assign));
 
         match operator {
             TokenType::LeftParen => ParseRule {
-                prefix: Some(grouping),
+                prefix: Some(PrefixParseFn::ParseFn(grouping)),
                 infix: None,
                 precedence: Precedence::None,
             },
             TokenType::Minus => ParseRule {
-                prefix: Some(unary),
-                infix: Some(binary),
+                prefix: Some(PrefixParseFn::ParseFn(unary)),
+                infix: Some(InfixParseFn::ParseFn(binary)),
                 precedence: Precedence::Term,
             },
             TokenType::Plus => ParseRule {
                 prefix: None,
-                infix: Some(binary),
+                infix: Some(InfixParseFn::ParseFn(binary)),
                 precedence: Precedence::Term,
             },
             TokenType::Star | TokenType::Slash => ParseRule {
                 prefix: None,
-                infix: Some(binary),
+                infix: Some(InfixParseFn::ParseFn(binary)),
                 precedence: Precedence::Factor,
             },
             TokenType::Number => ParseRule {
-                prefix: Some(number),
+                prefix: Some(PrefixParseFn::ParseFn(number)),
                 infix: None,
                 precedence: Precedence::None,
             },
             TokenType::True | TokenType::False | TokenType::Nil | TokenType::String => ParseRule {
-                prefix: Some(literal),
+                prefix: Some(PrefixParseFn::ParseFn(literal)),
                 infix: None,
                 precedence: Precedence::None,
             },
             TokenType::Bang => ParseRule {
-                prefix: Some(unary),
+                prefix: Some(PrefixParseFn::ParseFn(unary)),
                 infix: None,
                 precedence: Precedence::None,
             },
             TokenType::EqualEqual | TokenType::BangEqual => ParseRule {
                 prefix: None,
-                infix: Some(binary),
+                infix: Some(InfixParseFn::ParseFn(binary)),
                 precedence: Precedence::Equality,
             },
             TokenType::Greater
@@ -195,8 +310,13 @@ impl<'a> Parser<'a> {
             | TokenType::Less
             | TokenType::LessEqual => ParseRule {
                 prefix: None,
-                infix: Some(binary),
+                infix: Some(InfixParseFn::ParseFn(binary)),
                 precedence: Precedence::Comparison,
+            },
+            TokenType::Identifier => ParseRule {
+                prefix: Some(PrefixParseFn::ParseFnCanAssign(variable)),
+                infix: None,
+                precedence: Precedence::None,
             },
             _ => ParseRule {
                 prefix: None,
@@ -206,7 +326,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn grouping(&mut self) -> Result<Vec<OpCode>, String> {
+    fn grouping(&mut self) -> Result<Vec<Instruction>, String> {
         logger::debug("grouping");
 
         let expression = self.expression()?;
@@ -219,13 +339,14 @@ impl<'a> Parser<'a> {
         Ok(expression)
     }
 
-    fn binary(&mut self) -> Result<Vec<OpCode>, String> {
+    fn binary(&mut self) -> Result<Vec<Instruction>, String> {
         logger::debug("binary");
 
-        let token_type = self
+        let previous = self
             .previous
-            .ok_or("Expected binary operator, found nothing")?
-            .token_type;
+            .ok_or("Expected binary operator, found nothing")?;
+        let token_type = previous.token_type;
+        let line = previous.line;
         let precedence = self.get_rule(token_type).precedence.next().ok_or(format!(
             "Can not determine precedence for token: {:?}",
             token_type
@@ -233,24 +354,24 @@ impl<'a> Parser<'a> {
         let mut operations = self.parse_precedence(precedence)?;
 
         match token_type {
-            TokenType::Plus => operations.push(OpCode::Add),
-            TokenType::Minus => operations.push(OpCode::Subtract),
-            TokenType::Star => operations.push(OpCode::Multiply),
-            TokenType::Slash => operations.push(OpCode::Divide),
-            TokenType::EqualEqual => operations.push(OpCode::Equal),
+            TokenType::Plus => operations.push(Instruction::new(OpCode::Add, line)),
+            TokenType::Minus => operations.push(Instruction::new(OpCode::Subtract, line)),
+            TokenType::Star => operations.push(Instruction::new(OpCode::Multiply, line)),
+            TokenType::Slash => operations.push(Instruction::new(OpCode::Divide, line)),
+            TokenType::EqualEqual => operations.push(Instruction::new(OpCode::Equal, line)),
             TokenType::BangEqual => {
-                operations.push(OpCode::Equal);
-                operations.push(OpCode::Not);
+                operations.push(Instruction::new(OpCode::Equal, line));
+                operations.push(Instruction::new(OpCode::Not, line));
             }
-            TokenType::Greater => operations.push(OpCode::Greater),
+            TokenType::Greater => operations.push(Instruction::new(OpCode::Greater, line)),
             TokenType::GreaterEqual => {
-                operations.push(OpCode::Less);
-                operations.push(OpCode::Not);
+                operations.push(Instruction::new(OpCode::Less, line));
+                operations.push(Instruction::new(OpCode::Not, line));
             }
-            TokenType::Less => operations.push(OpCode::Less),
+            TokenType::Less => operations.push(Instruction::new(OpCode::Less, line)),
             TokenType::LessEqual => {
-                operations.push(OpCode::Greater);
-                operations.push(OpCode::Not);
+                operations.push(Instruction::new(OpCode::Greater, line));
+                operations.push(Instruction::new(OpCode::Not, line));
             }
             _ => {
                 return Err(format!("Unexpected binary operator type: {:?}", token_type));
@@ -260,18 +381,18 @@ impl<'a> Parser<'a> {
         Ok(operations)
     }
 
-    fn unary(&mut self) -> Result<Vec<OpCode>, String> {
+    fn unary(&mut self) -> Result<Vec<Instruction>, String> {
         logger::debug("unary");
 
         let previous = self
             .previous
             .ok_or("No operand found when parsing unary expression")?;
 
-        let mut operations = self.parse_precedence(Precedence::Unary)?;
+        let mut instructions = self.parse_precedence(Precedence::Unary)?;
 
         match previous.token_type {
-            TokenType::Minus => operations.push(OpCode::Negate),
-            TokenType::Bang => operations.push(OpCode::Not),
+            TokenType::Minus => instructions.push(Instruction::new(OpCode::Negate, previous.line)),
+            TokenType::Bang => instructions.push(Instruction::new(OpCode::Not, previous.line)),
             _ => {
                 return Err(format!(
                     "Unexpected unary operator type: {:?}",
@@ -280,37 +401,131 @@ impl<'a> Parser<'a> {
             }
         };
 
-        Ok(operations)
+        Ok(instructions)
     }
 
-    fn number(&mut self) -> Result<Vec<OpCode>, String> {
+    fn number(&mut self) -> Result<Vec<Instruction>, String> {
         logger::debug("number");
 
-        self.previous
-            .ok_or("Expected number when parsing number, found nothing")?
+        let previous = self
+            .previous
+            .ok_or("Expected number when parsing number, found nothing")?;
+
+        previous
             .lexeme
             .parse::<f64>()
-            .map(|value| vec![OpCode::Value(Value::Number(value))])
+            .map(|value| {
+                vec![Instruction::new(
+                    OpCode::Value(Value::Number(value)),
+                    previous.line,
+                )]
+            })
             .map_err(|e| e.to_string())
     }
 
-    fn literal(&mut self) -> Result<Vec<OpCode>, String> {
+    fn literal(&mut self) -> Result<Vec<Instruction>, String> {
         logger::debug("literal");
 
         let previous = self.previous.ok_or("Expected literal, found nothing")?;
         let lexeme = previous.lexeme;
+        let line = previous.line;
 
         match previous.token_type {
-            TokenType::True | TokenType::False => Ok(vec![OpCode::Value(Value::Bool(
-                previous.token_type == TokenType::True,
-            ))]),
-            TokenType::Nil => Ok(vec![OpCode::Value(Value::Nil)]),
-            TokenType::String => Ok(vec![OpCode::Value(Value::String(lexeme.to_string()))]),
+            TokenType::True | TokenType::False => Ok(vec![Instruction::new(
+                OpCode::Value(Value::Bool(previous.token_type == TokenType::True)),
+                line,
+            )]),
+            TokenType::Nil => Ok(vec![Instruction::new(OpCode::Value(Value::Nil), line)]),
+            TokenType::String => Ok(vec![Instruction::new(
+                OpCode::Value(Value::String(lexeme.to_string())),
+                line,
+            )]),
             _ => Err(format!(
                 "Unexpected literal type: {:?}",
                 previous.token_type
             )),
         }
+    }
+
+    fn variable(&mut self, can_assign: bool) -> Result<Vec<Instruction>, String> {
+        logger::debug("variable");
+
+        let previous = self
+            .previous
+            .ok_or("Expected variable name, found nothing")?;
+
+        let name = previous.lexeme;
+        let line = previous.line;
+
+        self.named_variable(name, line, can_assign)
+    }
+
+    fn named_variable(
+        &mut self,
+        name: &str,
+        line: usize,
+        can_assign: bool,
+    ) -> Result<Vec<Instruction>, String> {
+        logger::debug("named_variable");
+
+        if can_assign && self.match_token(TokenType::Equal)? {
+            let mut operations = self.expression()?;
+            operations.push(Instruction::new(OpCode::SetGlobal(name.to_string()), line));
+            return Ok(operations);
+        }
+
+        Ok(vec![Instruction::new(
+            OpCode::GetGlobal(name.to_string()),
+            line,
+        )])
+    }
+
+    fn match_token(&mut self, token_type: TokenType) -> Result<bool, String> {
+        if self.check(token_type) {
+            self.advance()?;
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
+
+    fn check(&mut self, token_type: TokenType) -> bool {
+        match &self.current {
+            Some(token) => token.token_type == token_type,
+            None => false,
+        }
+    }
+
+    #[allow(unreachable_code)]
+    fn syncronize(&mut self) -> Result<(), String> {
+        self.panic_mode = false;
+
+        loop {
+            if self.current.is_none() {
+                return Ok(());
+            }
+
+            if self.previous.is_some() && self.previous.unwrap().token_type == TokenType::Semicolon
+            {
+                return Ok(());
+            }
+
+            match self.current.unwrap().token_type {
+                TokenType::Class
+                | TokenType::Fun
+                | TokenType::Var
+                | TokenType::For
+                | TokenType::If
+                | TokenType::While
+                | TokenType::Print
+                | TokenType::Return => return Ok(()),
+                _ => (),
+            }
+
+            self.advance()?;
+        }
+
+        Ok(())
     }
 
     fn error_at(&mut self, token: &Token<'a>, message: &str) -> Result<(), String> {
@@ -324,12 +539,14 @@ impl<'a> Parser<'a> {
             return Ok(());
         }
 
-        self.had_error = true;
-
-        Err(format!(
+        let error_string = format!(
             "[line {}] Error at {}: {}",
             token.line, token.lexeme, message
-        ))
+        );
+
+        self.error = Some(error_string.clone());
+
+        Err(error_string)
     }
 }
 
@@ -403,10 +620,20 @@ impl Precedence {
     }
 }
 
-type ParseFn = Box<dyn Fn(&mut Parser) -> Result<Vec<OpCode>, String>>;
+type ParseFn = Box<dyn Fn(&mut Parser) -> Result<Vec<Instruction>, String>>;
+type ParseFnCanAssign = Box<dyn Fn(&mut Parser, bool) -> Result<Vec<Instruction>, String>>;
+
+enum PrefixParseFn {
+    ParseFn(ParseFn),
+    ParseFnCanAssign(ParseFnCanAssign),
+}
+
+enum InfixParseFn {
+    ParseFn(ParseFn),
+}
 
 struct ParseRule {
-    prefix: Option<ParseFn>,
-    infix: Option<ParseFn>,
+    prefix: Option<PrefixParseFn>,
+    infix: Option<InfixParseFn>,
     precedence: Precedence,
 }

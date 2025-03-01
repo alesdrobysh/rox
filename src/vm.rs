@@ -1,5 +1,6 @@
 use crate::chunk::{Chunk, OpCode};
 use crate::value::Value;
+use std::collections::HashMap;
 
 #[derive(Debug)]
 pub enum InterpretError {
@@ -8,9 +9,11 @@ pub enum InterpretError {
 }
 pub type InterpretResult = Result<(), InterpretError>;
 
+#[derive(Debug)]
 pub struct VM<'a> {
     pub chunk: &'a mut Chunk,
     pub stack: Vec<Value>,
+    globals: HashMap<String, Value>,
 }
 
 impl<'a> VM<'a> {
@@ -18,6 +21,7 @@ impl<'a> VM<'a> {
         VM {
             chunk,
             stack: Vec::new(),
+            globals: HashMap::new(),
         }
     }
 
@@ -37,12 +41,7 @@ impl<'a> VM<'a> {
 
             let line = instruction.line;
             match &instruction.op_code {
-                OpCode::Return => {
-                    return {
-                        println!("{:?}", self.stack);
-                        Ok(())
-                    }
-                }
+                OpCode::Return => return Ok(()),
                 OpCode::Value(value) => {
                     self.stack.push(value.clone());
                 }
@@ -62,10 +61,10 @@ impl<'a> VM<'a> {
                     }
                 },
                 OpCode::Add => match (self.stack.pop(), self.stack.pop()) {
-                    (Some(Value::Number(a)), Some(Value::Number(b))) => {
+                    (Some(Value::Number(b)), Some(Value::Number(a))) => {
                         self.stack.push(Value::Number(a + b));
                     }
-                    (Some(Value::String(a)), Some(Value::String(b))) => {
+                    (Some(Value::String(b)), Some(Value::String(a))) => {
                         self.stack.push(Value::String(format!("{}{}", a, b)));
                     }
                     (Some(_), Some(_)) => {
@@ -129,6 +128,36 @@ impl<'a> VM<'a> {
                 },
                 OpCode::Greater => self.binary_op(|a, b| Ok(Value::Bool(a > b)), line)?,
                 OpCode::Less => self.binary_op(|a, b| Ok(Value::Bool(a < b)), line)?,
+                OpCode::Print => {
+                    let value = self.stack.pop().ok_or(InterpretError::RuntimeError(
+                        "Not enough values to print".to_string(),
+                        line,
+                    ))?;
+
+                    println!("{}", value);
+                }
+                OpCode::DefineGlobal(name) => {
+                    let value = self.stack.pop().ok_or(InterpretError::RuntimeError(
+                        "Not enough values to define global variable".to_string(),
+                        line,
+                    ))?;
+                    self.globals.insert(name.clone(), value);
+                }
+                OpCode::GetGlobal(name) => {
+                    let value = self.globals.get(name).ok_or(InterpretError::RuntimeError(
+                        format!("Undefined variable '{}'", name),
+                        line,
+                    ))?;
+
+                    self.stack.push(value.clone());
+                }
+                OpCode::SetGlobal(name) => {
+                    let value = self.stack.pop().ok_or(InterpretError::RuntimeError(
+                        "Not enough values to set global variable".to_string(),
+                        line,
+                    ))?;
+                    self.globals.insert(name.clone(), value);
+                }
             }
         }
     }
@@ -138,7 +167,7 @@ impl<'a> VM<'a> {
         F: Fn(f64, f64) -> Result<Value, InterpretError>,
     {
         match (self.stack.pop(), self.stack.pop()) {
-            (Some(Value::Number(a)), Some(Value::Number(b))) => {
+            (Some(Value::Number(b)), Some(Value::Number(a))) => {
                 let result = op(a, b)?;
                 self.stack.push(result);
                 Ok(())
