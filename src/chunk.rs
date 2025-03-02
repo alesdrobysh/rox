@@ -1,4 +1,5 @@
 use crate::value::Value;
+use std::fmt;
 
 #[derive(Debug)]
 pub enum OpCode {
@@ -40,8 +41,10 @@ impl Instruction {
     pub fn new(op_code: OpCode, line: usize) -> Instruction {
         Instruction { op_code, line }
     }
+}
 
-    pub fn to_string(&self) -> String {
+impl fmt::Display for Instruction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let op_str = match &self.op_code {
             OpCode::Return => "RETURN".to_string(),
             OpCode::Value(value) => format!("VALUE {:?}", value),
@@ -60,7 +63,7 @@ impl Instruction {
             OpCode::SetGlobal(name) => format!("SET_GLOBAL {}", name),
         };
 
-        format!("{:4} {}", self.line, op_str)
+        write!(f, "line {:3}: {}", self.line, op_str)
     }
 }
 
@@ -90,7 +93,7 @@ impl Chunk {
         let mut result = String::from(format!("== {} ==\n", name));
 
         for instruction in self.instructions.iter() {
-            result.push_str(&instruction.to_string());
+            result.push_str(&format!("{}", instruction));
             result.push_str("\n");
         }
 
