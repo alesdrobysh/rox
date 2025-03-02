@@ -10,29 +10,26 @@ pub enum InterpretError {
 pub type InterpretResult = Result<(), InterpretError>;
 
 #[derive(Debug)]
-pub struct VM<'a> {
-    pub chunk: &'a mut Chunk,
+pub struct VM {
     pub stack: Vec<Value>,
     globals: HashMap<String, Value>,
 }
 
-impl<'a> VM<'a> {
-    pub fn new(chunk: &'a mut Chunk) -> VM<'a> {
+impl VM {
+    pub fn new() -> VM {
         VM {
-            chunk,
             stack: Vec::new(),
             globals: HashMap::new(),
         }
     }
 
-    pub fn interpret(&mut self) -> InterpretResult {
-        self.run()
+    pub fn interpret(&mut self, chunk: &mut Chunk) -> InterpretResult {
+        self.run(chunk)
     }
 
-    fn run(&mut self) -> InterpretResult {
+    fn run(&mut self, chunk: &mut Chunk) -> InterpretResult {
         loop {
-            let instruction = self
-                .chunk
+            let instruction = chunk
                 .next_instruction()
                 .ok_or(InterpretError::RuntimeError(
                     "No more instructions".to_string(),

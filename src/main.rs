@@ -10,15 +10,16 @@ use std::io::{Read, Write};
 use std::{env, fs, io, process};
 
 use compiler::Compiler;
-use vm::{InterpretError, InterpretResult};
+use vm::{InterpretError, InterpretResult, VM};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+    let mut vm = VM::new();
 
     if args.len() == 1 {
-        repl();
+        repl(&mut vm);
     } else if args.len() == 2 {
-        match run_file(&args[1]) {
+        match run_file(&args[1], &mut vm) {
             Ok(_) => {}
             Err(InterpretError::CompileError(e)) => {
                 eprintln!("Compile error: {}", e);
@@ -35,7 +36,7 @@ fn main() {
     }
 }
 
-fn repl() {
+fn repl(vm: &mut VM) {
     println!("Welcome to Lox REPL!");
 
     loop {
@@ -47,7 +48,7 @@ fn repl() {
             .read_line(&mut input)
             .expect("Failed to read line");
 
-        match run(input) {
+        match run(input, vm) {
             Ok(()) => {}
             Err(InterpretError::CompileError(e)) => {
                 eprintln!("Compile error: {}", e);
@@ -59,13 +60,13 @@ fn repl() {
     }
 }
 
-fn run_file(path: &str) -> InterpretResult {
+fn run_file(path: &str, vm: &mut VM) -> InterpretResult {
     match fs::File::open(path) {
         Ok(mut file) => {
             let mut contents = String::new();
             file.read_to_string(&mut contents)
                 .expect("Failed to read file");
-            run(contents)
+            run(contents, vm)
         }
         Err(e) => {
             eprintln!("Error opening file: {}", e);
@@ -74,11 +75,11 @@ fn run_file(path: &str) -> InterpretResult {
     }
 }
 
-fn run(source: String) -> InterpretResult {
+fn run(source: String, vm: &mut VM) -> InterpretResult {
     let mut compiler = Compiler::new(&source);
     let chunk = compiler
         .compile()
         .map_err(|error| InterpretError::CompileError(error))?;
 
-    vm::VM::new(chunk).interpret()
+    vm.interpret(chunk)
 }
