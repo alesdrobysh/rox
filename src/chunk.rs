@@ -18,6 +18,9 @@ pub enum OpCode {
     DefineGlobal(String),
     GetGlobal(String),
     SetGlobal(String),
+    SetLocal(usize),
+    GetLocal(usize),
+    Pop,
 }
 
 impl Clone for OpCode {
@@ -61,6 +64,9 @@ impl fmt::Display for Instruction {
             OpCode::DefineGlobal(name) => format!("DEFINE_GLOBAL {}", name),
             OpCode::GetGlobal(name) => format!("GET_GLOBAL {}", name),
             OpCode::SetGlobal(name) => format!("SET_GLOBAL {}", name),
+            OpCode::SetLocal(index) => format!("SET_LOCAL {}", index),
+            OpCode::GetLocal(index) => format!("GET_LOCAL {}", index),
+            OpCode::Pop => "POP".to_string(),
         };
 
         write!(f, "line {:3}: {}", self.line, op_str)

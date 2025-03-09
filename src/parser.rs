@@ -1,5 +1,6 @@
 use crate::{
     chunk::{Instruction, OpCode},
+    lexical_scope::LexicalScopeRegistry,
     logger,
     scanner::{Scanner, Token, TokenType},
     value::Value,
@@ -11,6 +12,7 @@ pub struct Parser<'a> {
     pub previous: Option<Token<'a>>,
     pub error: Option<String>,
     panic_mode: bool,
+    lexical_scope_registry: LexicalScopeRegistry,
 }
 
 impl<'a> Parser<'a> {
@@ -22,10 +24,13 @@ impl<'a> Parser<'a> {
             previous: None,
             error: None,
             panic_mode: false,
+            lexical_scope_registry: LexicalScopeRegistry::new(),
         }
     }
 
     pub fn parse(&mut self) -> Result<Vec<Instruction>, String> {
+        logger::debug("parse");
+
         let mut operations = Vec::new();
 
         while !self.is_at_end() {
@@ -44,6 +49,8 @@ impl<'a> Parser<'a> {
     }
 
     fn declaration(&mut self) -> Result<Vec<Instruction>, String> {
+        logger::debug("declaration");
+
         let result;
 
         if self.match_token(TokenType::Var)? {
@@ -62,12 +69,17 @@ impl<'a> Parser<'a> {
     fn var_declaration(&mut self) -> Result<Vec<Instruction>, String> {
         logger::debug("var_declaration");
 
+        let depth = self.lexical_scope_registry.depth;
         let identifier = self.consume(TokenType::Identifier, "Expect variable name")?;
 
         let name = identifier.lexeme.to_string();
         let line = identifier.line;
 
         let mut operations = Vec::new();
+
+        if depth > 0 {
+            self.declare_variable(name.clone())?;
+        }
 
         if self.match_token(TokenType::Equal)? {
             operations = self.expression()?;
@@ -80,17 +92,55 @@ impl<'a> Parser<'a> {
             "Expect ';' after variable declaration",
         )?;
 
+        if depth > 0 {
+            self.lexical_scope_registry.mark_initialized()?;
+            return Ok(operations);
+        }
+
         operations.push(Instruction::new(OpCode::DefineGlobal(name), line));
 
         Ok(operations)
     }
 
+    fn declare_variable(&mut self, name: String) -> Result<(), String> {
+        for variable in self.lexical_scope_registry.iter() {
+            match variable.depth {
+                Some(depth)
+                    if depth == self.lexical_scope_registry.depth && variable.name == name =>
+                {
+                    return Err(format!(
+                        "Variable '{}' already declared in this scope",
+                        name
+                    ));
+                }
+                _ => {}
+            }
+        }
+
+        self.lexical_scope_registry.add_local(name)?;
+        Ok(())
+    }
+
     fn statement(&mut self) -> Result<Vec<Instruction>, String> {
+        logger::debug("statement");
+
         if self.match_token(TokenType::Print)? {
             return self.print_statement();
         }
 
-        self.expression_statement()
+        let mut operations = Vec::new();
+
+        if self.match_token(TokenType::LeftBrace)? {
+            self.begin_scope();
+            operations = self.block()?;
+            operations.extend(self.end_scope()?);
+
+            logger::debug("END BLOCK");
+        } else {
+            operations.extend(self.expression_statement()?);
+        }
+
+        Ok(operations)
     }
 
     fn print_statement(&mut self) -> Result<Vec<Instruction>, String> {
@@ -106,6 +156,53 @@ impl<'a> Parser<'a> {
         self.consume(TokenType::Semicolon, "Expect ';' after value")?;
 
         Ok(operations)
+    }
+
+    fn block(&mut self) -> Result<Vec<Instruction>, String> {
+        logger::debug("block");
+
+        let mut operations = Vec::new();
+
+        while !self.check(TokenType::RightBrace) && !self.is_at_end() {
+            operations.extend(self.declaration()?);
+        }
+
+        self.consume(TokenType::RightBrace, "Expect '}' after block")?;
+
+        Ok(operations)
+    }
+
+    fn begin_scope(&mut self) {
+        self.lexical_scope_registry.increment_depth();
+    }
+
+    fn end_scope(&mut self) -> Result<Vec<Instruction>, String> {
+        self.lexical_scope_registry.decrement_depth();
+
+        let line = self.previous.ok_or("Unexpected end of input")?.line;
+
+        let mut instructions = Vec::new();
+
+        loop {
+            if self.lexical_scope_registry.is_empty() {
+                break;
+            }
+
+            let variable = self
+                .lexical_scope_registry
+                .peek()
+                .ok_or("Unexpected end of input")?;
+
+            match variable.depth {
+                Some(depth) if depth <= self.lexical_scope_registry.depth => break,
+                _ => {}
+            }
+
+            self.lexical_scope_registry.pop();
+            instructions.push(Instruction::new(OpCode::Pop, line));
+        }
+
+        Ok(instructions)
     }
 
     fn expression_statement(&mut self) -> Result<Vec<Instruction>, String> {
@@ -177,13 +274,13 @@ impl<'a> Parser<'a> {
 
             let infix = self.get_rule(current.token_type).infix;
 
-            if infix.is_some() {
+            if let Some(infix) = infix {
                 logger::debug(&format!(
                     "Found infix operation for current token_type {:?}",
                     current.token_type
                 ));
 
-                match infix.unwrap() {
+                match infix {
                     InfixParseFn::ParseFn(f) => {
                         operations.extend(f(self)?);
                     }
@@ -468,16 +565,21 @@ impl<'a> Parser<'a> {
     ) -> Result<Vec<Instruction>, String> {
         logger::debug("named_variable");
 
+        let mut set_operation = OpCode::SetGlobal(name.to_string());
+        let mut get_operation = OpCode::GetGlobal(name.to_string());
+
+        if let Some(local) = self.lexical_scope_registry.resolve_local(name)? {
+            set_operation = OpCode::SetLocal(local.clone());
+            get_operation = OpCode::GetLocal(local.clone());
+        }
+
         if can_assign && self.match_token(TokenType::Equal)? {
             let mut operations = self.expression()?;
-            operations.push(Instruction::new(OpCode::SetGlobal(name.to_string()), line));
+            operations.push(Instruction::new(set_operation, line));
             return Ok(operations);
         }
 
-        Ok(vec![Instruction::new(
-            OpCode::GetGlobal(name.to_string()),
-            line,
-        )])
+        Ok(vec![Instruction::new(get_operation, line)])
     }
 
     fn match_token(&mut self, token_type: TokenType) -> Result<bool, String> {

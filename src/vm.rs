@@ -155,6 +155,38 @@ impl VM {
                     ))?;
                     self.globals.insert(name.clone(), value);
                 }
+                OpCode::SetLocal(local) => {
+                    let value = self.stack.pop().ok_or(InterpretError::RuntimeError(
+                        "Not enough values to set local variable".to_string(),
+                        line,
+                    ))?;
+
+                    if *local >= self.stack.len() {
+                        return Err(InterpretError::RuntimeError(
+                            format!("Invalid local variable index {}", local),
+                            line,
+                        ));
+                    }
+
+                    self.stack[*local] = value;
+                }
+                OpCode::GetLocal(index) => {
+                    if *index >= self.stack.len() {
+                        return Err(InterpretError::RuntimeError(
+                            format!("Local variable access out of bounds: index {}", index),
+                            line,
+                        ));
+                    }
+
+                    let value = self.stack[*index].clone();
+                    self.stack.push(value);
+                }
+                OpCode::Pop => {
+                    self.stack.pop().ok_or(InterpretError::RuntimeError(
+                        "Not enough values to pop".to_string(),
+                        line,
+                    ))?;
+                }
             }
         }
     }

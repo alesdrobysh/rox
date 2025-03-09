@@ -1,5 +1,6 @@
 mod chunk;
 mod compiler;
+mod lexical_scope;
 mod logger;
 mod parser;
 mod scanner;

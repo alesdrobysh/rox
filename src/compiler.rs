@@ -10,10 +10,8 @@ pub struct Compiler<'a> {
 
 impl<'a> Compiler<'a> {
     pub fn new(source: &'a str) -> Compiler<'a> {
-        let scanner = Scanner::new(source);
-
         Compiler {
-            parser: Parser::new(scanner),
+            parser: Parser::new(Scanner::new(source)),
             compiling_chunk: Chunk::new(),
         }
     }
