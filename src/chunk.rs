@@ -21,6 +21,8 @@ pub enum OpCode {
     SetLocal(usize),
     GetLocal(usize),
     Pop,
+    JumpIfFalse(usize),
+    Jump(usize),
 }
 
 impl Clone for OpCode {
@@ -67,6 +69,8 @@ impl fmt::Display for Instruction {
             OpCode::SetLocal(index) => format!("SET_LOCAL {}", index),
             OpCode::GetLocal(index) => format!("GET_LOCAL {}", index),
             OpCode::Pop => "POP".to_string(),
+            OpCode::JumpIfFalse(offset) => format!("JUMP_IF_FALSE {}", offset),
+            OpCode::Jump(offset) => format!("JUMP {}", offset),
         };
 
         write!(f, "line {:3}: {}", self.line, op_str)
@@ -114,5 +118,9 @@ impl Chunk {
         } else {
             None
         }
+    }
+
+    pub fn offset(&mut self, distance: usize) {
+        self.ip += distance
     }
 }

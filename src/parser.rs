@@ -128,6 +128,10 @@ impl<'a> Parser<'a> {
             return self.print_statement();
         }
 
+        if self.match_token(TokenType::If)? {
+            return self.if_statement();
+        }
+
         let mut operations = Vec::new();
 
         if self.match_token(TokenType::LeftBrace)? {
@@ -154,6 +158,47 @@ impl<'a> Parser<'a> {
         operations.push(Instruction::new(OpCode::Print, line));
 
         self.consume(TokenType::Semicolon, "Expect ';' after value")?;
+
+        Ok(operations)
+    }
+
+    fn if_statement(&mut self) -> Result<Vec<Instruction>, String> {
+        logger::debug("if_statement");
+
+        self.consume(TokenType::LeftParen, "Expect '(' after 'if'")?;
+        let mut operations = self.expression()?;
+        let line = self
+            .previous
+            .ok_or("Expected expression, found nothing")?
+            .line;
+        self.consume(TokenType::RightParen, "Expect ')' after if condition")?;
+
+        let mut then_statement = self.statement()?;
+
+        let match_else = self.match_token(TokenType::Else)?;
+        let mut jump_if_false = vec![Instruction::new(
+            OpCode::JumpIfFalse(if match_else {
+                then_statement.len() + 1
+            } else {
+                then_statement.len()
+            }),
+            line,
+        )];
+
+        operations.append(&mut jump_if_false);
+        operations.append(&mut then_statement);
+
+        let line = self
+            .previous
+            .ok_or("Expected expression, found nothing")?
+            .line;
+        if match_else {
+            let mut else_statement = self.statement()?;
+            let mut jump = vec![Instruction::new(OpCode::Jump(else_statement.len()), line)];
+
+            operations.append(&mut jump);
+            operations.append(&mut else_statement);
+        }
 
         Ok(operations)
     }

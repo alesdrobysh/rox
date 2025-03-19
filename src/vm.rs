@@ -11,7 +11,7 @@ pub type InterpretResult = Result<(), InterpretError>;
 
 #[derive(Debug)]
 pub struct VM {
-    pub stack: Vec<Value>,
+    stack: Vec<Value>,
     globals: HashMap<String, Value>,
 }
 
@@ -186,6 +186,20 @@ impl VM {
                         "Not enough values to pop".to_string(),
                         line,
                     ))?;
+                }
+                OpCode::JumpIfFalse(offset) => {
+                    let condition = self.stack.pop().ok_or(InterpretError::RuntimeError(
+                        "Not enough values to jump".to_string(),
+                        line,
+                    ))?;
+
+                    let effective_offset = if condition.is_falsey() { *offset } else { 0 };
+
+                    chunk.offset(effective_offset);
+                }
+                OpCode::Jump(offset) => {
+                    let offset = *offset;
+                    chunk.offset(offset);
                 }
             }
         }
