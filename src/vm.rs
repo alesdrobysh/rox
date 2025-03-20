@@ -40,10 +40,10 @@ impl VM {
             match &instruction.op_code {
                 OpCode::Return => return Ok(()),
                 OpCode::Value(value) => {
-                    self.stack.push(value.clone());
+                    self.push_stack(value.clone());
                 }
                 OpCode::Negate => match self.stack.pop() {
-                    Some(Value::Number(value)) => self.stack.push(Value::Number(-value)),
+                    Some(Value::Number(value)) => self.push_stack(Value::Number(-value)),
                     Some(_) => {
                         return Err(InterpretError::RuntimeError(
                             "Cannot negate non-number value".to_string(),
@@ -57,24 +57,16 @@ impl VM {
                         ))
                     }
                 },
-                OpCode::Add => match (self.stack.pop(), self.stack.pop()) {
-                    (Some(Value::Number(b)), Some(Value::Number(a))) => {
-                        self.stack.push(Value::Number(a + b));
-                    }
-                    (Some(Value::String(b)), Some(Value::String(a))) => {
-                        self.stack.push(Value::String(format!("{}{}", a, b)));
-                    }
-                    (Some(_), Some(_)) => {
-                        return Err(InterpretError::RuntimeError(
-                            "Operands must be numbers or strings".to_string(),
-                            line,
-                        ));
+                OpCode::Add => match (self.pop_stack(line)?, self.pop_stack(line)?) {
+                    (Value::Number(a), Value::Number(b)) => self.push_stack(Value::Number(a + b)),
+                    (Value::String(a), Value::String(b)) => {
+                        self.push_stack(Value::String(format!("{}{}", a, b)))
                     }
                     _ => {
                         return Err(InterpretError::RuntimeError(
-                            "Not enough operands".to_string(),
+                            "Operands must be numbers or strings".to_string(),
                             line,
-                        ));
+                        ))
                     }
                 },
                 OpCode::Subtract => self.binary_op(|a, b| Ok(Value::Number(a - b)), line)?,
@@ -93,51 +85,33 @@ impl VM {
                     line,
                 )?,
                 OpCode::Not => {
-                    let value = self.stack.pop().ok_or(InterpretError::RuntimeError(
-                        "Not enough values to negate".to_string(),
-                        line,
-                    ))?;
-
-                    self.stack.push(Value::Bool(value.is_falsey()));
+                    let value = self.pop_stack(line)?;
+                    self.push_stack(Value::Bool(value.is_falsey()));
                 }
-                OpCode::Equal => match (self.stack.pop(), self.stack.pop()) {
-                    (Some(Value::Number(a)), Some(Value::Number(b))) => {
-                        self.stack.push(Value::Bool(a == b));
+                OpCode::Equal => match (self.pop_stack(line)?, self.pop_stack(line)?) {
+                    (Value::Number(a), Value::Number(b)) => {
+                        self.push_stack(Value::Bool(a == b));
                     }
-                    (Some(Value::Bool(a)), Some(Value::Bool(b))) => {
-                        self.stack.push(Value::Bool(a == b));
+                    (Value::Bool(a), Value::Bool(b)) => {
+                        self.push_stack(Value::Bool(a == b));
                     }
-                    (Some(Value::Nil), Some(Value::Nil)) => {
-                        self.stack.push(Value::Bool(true));
+                    (Value::Nil, Value::Nil) => {
+                        self.push_stack(Value::Bool(true));
                     }
-                    (Some(Value::String(a)), Some(Value::String(b))) => {
-                        self.stack.push(Value::Bool(a == b));
+                    (Value::String(a), Value::String(b)) => {
+                        self.push_stack(Value::Bool(a == b));
                     }
-                    (Some(_), Some(_)) => {
-                        self.stack.push(Value::Bool(false));
-                    }
-                    _ => {
-                        return Err(InterpretError::RuntimeError(
-                            "Not enough values to compare".to_string(),
-                            line,
-                        ));
+                    (_, _) => {
+                        self.push_stack(Value::Bool(false));
                     }
                 },
                 OpCode::Greater => self.binary_op(|a, b| Ok(Value::Bool(a > b)), line)?,
                 OpCode::Less => self.binary_op(|a, b| Ok(Value::Bool(a < b)), line)?,
                 OpCode::Print => {
-                    let value = self.stack.pop().ok_or(InterpretError::RuntimeError(
-                        "Not enough values to print".to_string(),
-                        line,
-                    ))?;
-
-                    println!("{}", value);
+                    println!("{}", self.pop_stack(line)?);
                 }
                 OpCode::DefineGlobal(name) => {
-                    let value = self.stack.pop().ok_or(InterpretError::RuntimeError(
-                        "Not enough values to define global variable".to_string(),
-                        line,
-                    ))?;
+                    let value = self.pop_stack(line)?;
                     self.globals.insert(name.clone(), value);
                 }
                 OpCode::GetGlobal(name) => {
@@ -149,17 +123,11 @@ impl VM {
                     self.stack.push(value.clone());
                 }
                 OpCode::SetGlobal(name) => {
-                    let value = self.stack.pop().ok_or(InterpretError::RuntimeError(
-                        "Not enough values to set global variable".to_string(),
-                        line,
-                    ))?;
+                    let value = self.pop_stack(line)?;
                     self.globals.insert(name.clone(), value);
                 }
                 OpCode::SetLocal(local) => {
-                    let value = self.stack.pop().ok_or(InterpretError::RuntimeError(
-                        "Not enough values to set local variable".to_string(),
-                        line,
-                    ))?;
+                    let value = self.pop_stack(line)?;
 
                     if *local >= self.stack.len() {
                         return Err(InterpretError::RuntimeError(
@@ -179,21 +147,17 @@ impl VM {
                     }
 
                     let value = self.stack[*index].clone();
-                    self.stack.push(value);
+                    self.push_stack(value);
                 }
                 OpCode::Pop => {
-                    self.stack.pop().ok_or(InterpretError::RuntimeError(
-                        "Not enough values to pop".to_string(),
-                        line,
-                    ))?;
+                    self.pop_stack(line)?;
                 }
                 OpCode::JumpIfFalse(offset) => {
-                    let condition = self.stack.pop().ok_or(InterpretError::RuntimeError(
-                        "Not enough values to jump".to_string(),
-                        line,
-                    ))?;
-
-                    let effective_offset = if condition.is_falsey() { *offset } else { 0 };
+                    let effective_offset = if self.peek_stack(line)?.is_falsey() {
+                        *offset
+                    } else {
+                        0
+                    };
 
                     chunk.offset(effective_offset);
                 }
@@ -209,20 +173,33 @@ impl VM {
     where
         F: Fn(f64, f64) -> Result<Value, InterpretError>,
     {
-        match (self.stack.pop(), self.stack.pop()) {
-            (Some(Value::Number(b)), Some(Value::Number(a))) => {
-                let result = op(a, b)?;
-                self.stack.push(result);
+        match (self.pop_stack(line)?, self.pop_stack(line)?) {
+            (Value::Number(b), Value::Number(a)) => {
+                self.push_stack(op(a, b)?);
                 Ok(())
             }
-            (Some(_), Some(_)) => Err(InterpretError::RuntimeError(
+            (_, _) => Err(InterpretError::RuntimeError(
                 "Operands must be numbers".to_string(),
                 line,
             )),
-            _ => Err(InterpretError::RuntimeError(
-                "Not enough operands".to_string(),
-                line,
-            )),
         }
+    }
+
+    fn pop_stack(&mut self, line: usize) -> Result<Value, InterpretError> {
+        self.stack.pop().ok_or(InterpretError::RuntimeError(
+            "Stack is empty, cannot pop".to_string(),
+            line,
+        ))
+    }
+
+    fn peek_stack(&mut self, line: usize) -> Result<&Value, InterpretError> {
+        self.stack.last().ok_or(InterpretError::RuntimeError(
+            "Stack is empty, cannot peek".to_string(),
+            line,
+        ))
+    }
+
+    fn push_stack(&mut self, value: Value) {
+        self.stack.push(value)
     }
 }

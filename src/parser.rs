@@ -151,11 +151,7 @@ impl<'a> Parser<'a> {
         logger::debug("print_statement");
 
         let mut operations = self.expression()?;
-        let line = self
-            .previous
-            .ok_or("Expected expression, found nothing")?
-            .line;
-        operations.push(Instruction::new(OpCode::Print, line));
+        operations.push(Instruction::new(OpCode::Print, self.get_line()?));
 
         self.consume(TokenType::Semicolon, "Expect ';' after value")?;
 
@@ -167,36 +163,29 @@ impl<'a> Parser<'a> {
 
         self.consume(TokenType::LeftParen, "Expect '(' after 'if'")?;
         let mut operations = self.expression()?;
-        let line = self
-            .previous
-            .ok_or("Expected expression, found nothing")?
-            .line;
         self.consume(TokenType::RightParen, "Expect ')' after if condition")?;
 
         let mut then_statement = self.statement()?;
 
         let match_else = self.match_token(TokenType::Else)?;
-        let mut jump_if_false = vec![Instruction::new(
+
+        operations.push(Instruction::new(
             OpCode::JumpIfFalse(if match_else {
                 then_statement.len() + 1
             } else {
                 then_statement.len()
             }),
-            line,
-        )];
-
-        operations.append(&mut jump_if_false);
+            self.get_line()?,
+        ));
         operations.append(&mut then_statement);
 
-        let line = self
-            .previous
-            .ok_or("Expected expression, found nothing")?
-            .line;
         if match_else {
             let mut else_statement = self.statement()?;
-            let mut jump = vec![Instruction::new(OpCode::Jump(else_statement.len()), line)];
 
-            operations.append(&mut jump);
+            operations.push(Instruction::new(
+                OpCode::Jump(else_statement.len()),
+                self.get_line()?,
+            ));
             operations.append(&mut else_statement);
         }
 
@@ -405,6 +394,8 @@ impl<'a> Parser<'a> {
         let literal = Box::new(|parser: &mut Parser| parser.literal());
         let variable =
             Box::new(|parser: &mut Parser, can_assign: bool| parser.variable(can_assign));
+        let and = Box::new(|parser: &mut Parser| parser.and());
+        let or = Box::new(|parser: &mut Parser| parser.or());
 
         match operator {
             TokenType::LeftParen => ParseRule {
@@ -460,6 +451,16 @@ impl<'a> Parser<'a> {
                 infix: None,
                 precedence: Precedence::None,
             },
+            TokenType::And => ParseRule {
+                prefix: None,
+                infix: Some(InfixParseFn::ParseFn(and)),
+                precedence: Precedence::And,
+            },
+            TokenType::Or => ParseRule {
+                prefix: None,
+                infix: Some(InfixParseFn::ParseFn(or)),
+                precedence: Precedence::Or,
+            },
             _ => ParseRule {
                 prefix: None,
                 infix: None,
@@ -479,6 +480,35 @@ impl<'a> Parser<'a> {
         )?;
 
         Ok(expression)
+    }
+
+    fn and(&mut self) -> Result<Vec<Instruction>, String> {
+        logger::debug("and");
+
+        let mut expression = self.parse_precedence(Precedence::And)?;
+        let mut operations = vec![Instruction::new(
+            OpCode::JumpIfFalse(expression.len()),
+            self.get_line()?,
+        )];
+        operations.append(&mut expression);
+
+        return Ok(operations);
+    }
+
+    fn or(&mut self) -> Result<Vec<Instruction>, String> {
+        logger::debug("or");
+
+        let mut operations = vec![Instruction::new(OpCode::JumpIfFalse(1), self.get_line()?)];
+
+        let mut expression = self.parse_precedence(Precedence::Or)?;
+
+        operations.push(Instruction::new(
+            OpCode::Jump(expression.len()),
+            self.get_line()?,
+        ));
+        operations.append(&mut expression);
+
+        return Ok(operations);
     }
 
     fn binary(&mut self) -> Result<Vec<Instruction>, String> {
@@ -694,6 +724,10 @@ impl<'a> Parser<'a> {
         self.error = Some(error_string.clone());
 
         Err(error_string)
+    }
+
+    fn get_line(&mut self) -> Result<usize, String> {
+        Ok(self.previous.ok_or("Cannot get current line")?.line)
     }
 }
 
