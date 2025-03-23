@@ -58,8 +58,8 @@ impl VM {
                     }
                 },
                 OpCode::Add => match (self.pop_stack(line)?, self.pop_stack(line)?) {
-                    (Value::Number(a), Value::Number(b)) => self.push_stack(Value::Number(a + b)),
-                    (Value::String(a), Value::String(b)) => {
+                    (Value::Number(b), Value::Number(a)) => self.push_stack(Value::Number(a + b)),
+                    (Value::String(b), Value::String(a)) => {
                         self.push_stack(Value::String(format!("{}{}", a, b)))
                     }
                     _ => {
@@ -111,7 +111,7 @@ impl VM {
                     println!("{}", self.pop_stack(line)?);
                 }
                 OpCode::DefineGlobal(name) => {
-                    let value = self.pop_stack(line)?;
+                    let value = self.peek_stack(line)?;
                     self.globals.insert(name.clone(), value);
                 }
                 OpCode::GetGlobal(name) => {
@@ -123,12 +123,10 @@ impl VM {
                     self.stack.push(value.clone());
                 }
                 OpCode::SetGlobal(name) => {
-                    let value = self.pop_stack(line)?;
+                    let value = self.peek_stack(line)?;
                     self.globals.insert(name.clone(), value);
                 }
                 OpCode::SetLocal(local) => {
-                    let value = self.pop_stack(line)?;
-
                     if *local >= self.stack.len() {
                         return Err(InterpretError::RuntimeError(
                             format!("Invalid local variable index {}", local),
@@ -136,7 +134,7 @@ impl VM {
                         ));
                     }
 
-                    self.stack[*local] = value;
+                    self.stack[*local] = self.peek_stack(line)?;
                 }
                 OpCode::GetLocal(index) => {
                     if *index >= self.stack.len() {
@@ -192,11 +190,12 @@ impl VM {
         ))
     }
 
-    fn peek_stack(&mut self, line: usize) -> Result<&Value, InterpretError> {
-        self.stack.last().ok_or(InterpretError::RuntimeError(
+    fn peek_stack(&mut self, line: usize) -> Result<Value, InterpretError> {
+        let top = self.stack.last().ok_or(InterpretError::RuntimeError(
             "Stack is empty, cannot peek".to_string(),
             line,
-        ))
+        ))?;
+        Ok(top.clone())
     }
 
     fn push_stack(&mut self, value: Value) {

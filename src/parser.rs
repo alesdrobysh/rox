@@ -81,7 +81,8 @@ impl<'a> Parser<'a> {
             self.declare_variable(name.clone())?;
         }
 
-        if self.match_token(TokenType::Equal)? {
+        let match_equal = self.match_token(TokenType::Equal)?;
+        if match_equal {
             operations = self.expression()?;
         } else {
             operations.push(Instruction::new(OpCode::Value(Value::Nil), line));
@@ -98,6 +99,10 @@ impl<'a> Parser<'a> {
         }
 
         operations.push(Instruction::new(OpCode::DefineGlobal(name), line));
+
+        if match_equal {
+            operations.push(Instruction::new(OpCode::Pop, line));
+        }
 
         Ok(operations)
     }
@@ -170,23 +175,24 @@ impl<'a> Parser<'a> {
         let match_else = self.match_token(TokenType::Else)?;
 
         operations.push(Instruction::new(
-            OpCode::JumpIfFalse(if match_else {
-                then_statement.len() + 1
-            } else {
-                then_statement.len()
-            }),
+            OpCode::JumpIfFalse(then_statement.len() + 2),
             self.get_line()?,
         ));
+        operations.push(Instruction::new(OpCode::Pop, self.get_line()?));
         operations.append(&mut then_statement);
 
         if match_else {
             let mut else_statement = self.statement()?;
 
             operations.push(Instruction::new(
-                OpCode::Jump(else_statement.len()),
+                OpCode::Jump(else_statement.len() + 1),
                 self.get_line()?,
             ));
+            operations.push(Instruction::new(OpCode::Pop, self.get_line()?));
             operations.append(&mut else_statement);
+        } else {
+            operations.push(Instruction::new(OpCode::Jump(1), self.get_line()?));
+            operations.push(Instruction::new(OpCode::Pop, self.get_line()?));
         }
 
         Ok(operations)
@@ -242,9 +248,11 @@ impl<'a> Parser<'a> {
     fn expression_statement(&mut self) -> Result<Vec<Instruction>, String> {
         logger::debug("expression_statement");
 
-        let operations = self.expression()?;
+        let mut operations = self.expression()?;
 
         self.consume(TokenType::Semicolon, "Expect ';' after expression")?;
+
+        operations.push(Instruction::new(OpCode::Pop, self.get_line()?));
 
         Ok(operations)
     }
