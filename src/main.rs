@@ -3,14 +3,15 @@ mod compiler;
 mod lexical_scope;
 mod logger;
 mod parser;
+mod run;
 mod scanner;
 mod value;
 mod vm;
 
+use run::run;
 use std::io::{Read, Write};
 use std::{env, fs, io, process};
 
-use compiler::Compiler;
 use vm::{InterpretError, InterpretResult, VM};
 
 fn main() {
@@ -22,13 +23,9 @@ fn main() {
     } else if args.len() == 2 {
         match run_file(&args[1], &mut vm) {
             Ok(_) => {}
-            Err(InterpretError::CompileError(e)) => {
-                eprintln!("Compile error: {}", e);
+            Err(e) => {
+                println!("{}", e);
                 process::exit(65);
-            }
-            Err(InterpretError::RuntimeError(message, line)) => {
-                eprintln!("Runtime error at line {}: {}", line, message);
-                process::exit(70);
             }
         }
     } else {
@@ -74,13 +71,4 @@ fn run_file(path: &str, vm: &mut VM) -> InterpretResult {
             process::exit(1);
         }
     }
-}
-
-fn run(source: String, vm: &mut VM) -> InterpretResult {
-    let mut compiler = Compiler::new(&source);
-    let chunk = compiler
-        .compile()
-        .map_err(|error| InterpretError::CompileError(error))?;
-
-    vm.interpret(chunk)
 }

@@ -1,12 +1,25 @@
 use crate::chunk::{Chunk, OpCode};
 use crate::value::Value;
 use std::collections::HashMap;
+use std::io::{self, Write};
 
 #[derive(Debug)]
 pub enum InterpretError {
     CompileError(String),
     RuntimeError(String, usize),
 }
+
+impl std::fmt::Display for InterpretError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InterpretError::CompileError(msg) => write!(f, "Compile Error: {}", msg),
+            InterpretError::RuntimeError(msg, line) => {
+                write!(f, "Runtime Error at line {}: {}", line, msg)
+            }
+        }
+    }
+}
+
 pub type InterpretResult = Result<(), InterpretError>;
 
 #[derive(Debug)]
@@ -108,7 +121,9 @@ impl VM {
                 OpCode::Greater => self.binary_op(|a, b| Ok(Value::Bool(a > b)), line)?,
                 OpCode::Less => self.binary_op(|a, b| Ok(Value::Bool(a < b)), line)?,
                 OpCode::Print => {
-                    println!("{}", self.pop_stack(line)?);
+                    let stdout = io::stdout();
+                    let mut handle = stdout.lock();
+                    writeln!(handle, "{}", self.pop_stack(line)?).unwrap();
                 }
                 OpCode::DefineGlobal(name) => {
                     let value = self.peek_stack(line)?;
@@ -123,6 +138,12 @@ impl VM {
                     self.stack.push(value.clone());
                 }
                 OpCode::SetGlobal(name) => {
+                    if !self.globals.contains_key(&name[..]) {
+                        return Err(InterpretError::RuntimeError(
+                            format!("Undefined variable '{}'", name),
+                            line,
+                        ));
+                    }
                     let value = self.peek_stack(line)?;
                     self.globals.insert(name.clone(), value);
                 }
