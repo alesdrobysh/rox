@@ -23,6 +23,7 @@ pub enum OpCode {
     Pop,
     JumpIfFalse(usize),
     Jump(usize),
+    Loop(usize),
 }
 
 impl Clone for OpCode {
@@ -71,6 +72,7 @@ impl fmt::Display for Instruction {
             OpCode::Pop => "POP".to_string(),
             OpCode::JumpIfFalse(offset) => format!("JUMP_IF_FALSE {}", offset),
             OpCode::Jump(offset) => format!("JUMP {}", offset),
+            OpCode::Loop(offset) => format!("LOOP {}", offset),
         };
 
         write!(f, "line {:3}: {}", self.line, op_str)
@@ -122,5 +124,14 @@ impl Chunk {
 
     pub fn offset(&mut self, distance: usize) {
         self.ip += distance
+    }
+
+    pub fn offset_backward(&mut self, distance: usize) {
+        assert!(
+            distance <= self.ip,
+            "Attempted to jump before start of chunk"
+        );
+
+        self.ip -= distance
     }
 }

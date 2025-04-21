@@ -1,4 +1,5 @@
 use crate::chunk::{Chunk, OpCode};
+use crate::logger;
 use crate::value::Value;
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -48,6 +49,8 @@ impl VM {
                     "No more instructions".to_string(),
                     0,
                 ))?;
+
+            logger::debug(&format!("{:?}", instruction));
 
             let line = instruction.line;
             match &instruction.op_code {
@@ -184,7 +187,13 @@ impl VM {
                     let offset = *offset;
                     chunk.offset(offset);
                 }
+                OpCode::Loop(offset) => {
+                    let offset = *offset;
+                    chunk.offset_backward(offset);
+                }
             }
+
+            logger::debug(&format!("{:?}", self.stack));
         }
     }
 

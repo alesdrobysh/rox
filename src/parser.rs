@@ -137,6 +137,10 @@ impl<'a> Parser<'a> {
             return self.if_statement();
         }
 
+        if self.match_token(TokenType::While)? {
+            return self.while_statement();
+        }
+
         let mut operations = Vec::new();
 
         if self.match_token(TokenType::LeftBrace)? {
@@ -194,6 +198,29 @@ impl<'a> Parser<'a> {
             operations.push(Instruction::new(OpCode::Jump(1), self.get_line()?));
             operations.push(Instruction::new(OpCode::Pop, self.get_line()?));
         }
+
+        Ok(operations)
+    }
+
+    fn while_statement(&mut self) -> Result<Vec<Instruction>, String> {
+        self.consume(TokenType::LeftParen, "Expect '(' after 'while'.")?;
+        let mut operations = self.expression()?;
+        let operations_len = operations.len();
+        self.consume(TokenType::RightParen, "Expect ')' after condition.")?;
+
+        let mut body = self.statement()?;
+        let body_len = body.len();
+
+        operations.push(Instruction::new(
+            OpCode::JumpIfFalse(body_len + 2), // + Pop + Loop
+            self.get_line()?,
+        ));
+        operations.push(Instruction::new(OpCode::Pop, self.get_line()?));
+        operations.append(&mut body);
+        operations.push(Instruction::new(
+            OpCode::Loop(body_len + operations_len + 3), // + Pop + JumpIfFalse + Loop
+            self.get_line()?,
+        ));
 
         Ok(operations)
     }

@@ -1,6 +1,6 @@
 mod test_utils;
 
-use test_utils::{interpret_file_result, interpret_file_stdout};
+use test_utils::interpret_file_stdout;
 
 #[test]
 fn add() {
