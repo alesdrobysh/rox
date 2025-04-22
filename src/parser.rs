@@ -179,7 +179,7 @@ impl<'a> Parser<'a> {
         let match_else = self.match_token(TokenType::Else)?;
 
         operations.push(Instruction::new(
-            OpCode::JumpIfFalse(then_statement.len() + 2),
+            OpCode::JumpIfFalse(then_statement.len() + 2), // + Pop + Jump
             self.get_line()?,
         ));
         operations.push(Instruction::new(OpCode::Pop, self.get_line()?));
@@ -189,7 +189,7 @@ impl<'a> Parser<'a> {
             let mut else_statement = self.statement()?;
 
             operations.push(Instruction::new(
-                OpCode::Jump(else_statement.len() + 1),
+                OpCode::Jump(else_statement.len() + 1), // + Pop
                 self.get_line()?,
             ));
             operations.push(Instruction::new(OpCode::Pop, self.get_line()?));
@@ -205,20 +205,18 @@ impl<'a> Parser<'a> {
     fn while_statement(&mut self) -> Result<Vec<Instruction>, String> {
         self.consume(TokenType::LeftParen, "Expect '(' after 'while'.")?;
         let mut operations = self.expression()?;
-        let operations_len = operations.len();
         self.consume(TokenType::RightParen, "Expect ')' after condition.")?;
 
         let mut body = self.statement()?;
-        let body_len = body.len();
 
         operations.push(Instruction::new(
-            OpCode::JumpIfFalse(body_len + 2), // + Pop + Loop
+            OpCode::JumpIfFalse(body.len() + 2), // + Pop + Loop
             self.get_line()?,
         ));
         operations.push(Instruction::new(OpCode::Pop, self.get_line()?));
         operations.append(&mut body);
         operations.push(Instruction::new(
-            OpCode::Loop(body_len + operations_len + 3), // + Pop + JumpIfFalse + Loop
+            OpCode::Loop(operations.len() + 1), // + Loop itself
             self.get_line()?,
         ));
 
