@@ -141,6 +141,10 @@ impl<'a> Parser<'a> {
             return self.while_statement();
         }
 
+        if self.match_token(TokenType::For)? {
+            return self.for_statement();
+        }
+
         let mut operations = Vec::new();
 
         if self.match_token(TokenType::LeftBrace)? {
@@ -220,6 +224,65 @@ impl<'a> Parser<'a> {
             self.get_line()?,
         ));
 
+        Ok(operations)
+    }
+
+    fn for_statement(&mut self) -> Result<Vec<Instruction>, String> {
+        self.begin_scope();
+        self.consume(TokenType::LeftParen, "Expect '(' after 'for'.")?;
+
+        let mut operations = match (
+            self.match_token(TokenType::Var),
+            self.match_token(TokenType::Semicolon),
+        ) {
+            (Ok(true), Ok(false)) => self.var_declaration(),
+            (Ok(false), Ok(true)) => Ok(vec![]), // no initializer
+            (Ok(false), Ok(false)) => self.expression_statement(),
+            (_, _) => Err("Invalid for statement".to_string()),
+        }?;
+
+        let loop_start_index = operations.len();
+
+        let mut condition_jump_index = None;
+
+        if !self.match_token(TokenType::Semicolon)? {
+            let condition = self.expression()?;
+            self.consume(TokenType::Semicolon, "Expect ';' after loop condition.")?;
+            operations.extend(condition);
+
+            condition_jump_index = Some(operations.len());
+            operations.push(Instruction::new(OpCode::JumpIfFalse(0), self.get_line()?));
+            operations.push(Instruction::new(OpCode::Pop, self.get_line()?));
+        }
+
+        let increment = if !self.check(TokenType::RightParen) {
+            let mut expression = self.expression()?;
+            expression.push(Instruction::new(OpCode::Pop, self.get_line()?));
+            expression
+        } else {
+            vec![]
+        };
+
+        self.consume(
+            TokenType::RightParen,
+            "Expect ')' after for loop condition.",
+        )?;
+
+        let mut body = self.statement()?;
+        body.extend(increment);
+        body.push(Instruction::new(
+            OpCode::Loop(body.len() + operations.len() - loop_start_index + 1), // + Loop
+            self.get_line()?,
+        ));
+
+        if let Some(index) = condition_jump_index {
+            operations[index].op_code = OpCode::JumpIfFalse(body.len() + 1);
+        }
+
+        operations.extend(body);
+        operations.push(Instruction::new(OpCode::Pop, self.get_line()?)); // for JumpIfFalse to pop "false"
+
+        operations.extend(self.end_scope()?);
         Ok(operations)
     }
 
