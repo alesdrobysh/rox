@@ -15,7 +15,7 @@ impl Clone for Variable {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct LexicalScopeRegistry {
     variables: Vec<Variable>,
     pub depth: usize,
@@ -44,6 +44,10 @@ impl LexicalScopeRegistry {
 
     pub fn mark_initialized(&mut self) -> Result<(), String> {
         logger::debug("Marking variable as initialized");
+
+        if self.depth == 0 {
+            return Ok(());
+        }
 
         if let Some(last) = self.variables.last_mut() {
             last.depth = Some(self.depth);

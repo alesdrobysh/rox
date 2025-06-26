@@ -1,9 +1,10 @@
 use crate::value::Value;
 use std::fmt;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum OpCode {
     Return,
+    Call(usize),
     Value(Value),
     Negate,
     Add,
@@ -26,17 +27,6 @@ pub enum OpCode {
     Loop(usize),
 }
 
-impl Clone for OpCode {
-    fn clone(&self) -> OpCode {
-        match self {
-            OpCode::Value(Value::String(string)) => OpCode::Value(Value::String(string.clone())),
-            OpCode::Value(Value::Number(number)) => OpCode::Value(Value::Number(*number)),
-            OpCode::Value(Value::Bool(boolean)) => OpCode::Value(Value::Bool(*boolean)),
-            rest => rest.clone(),
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct Instruction {
     pub op_code: OpCode,
@@ -53,7 +43,21 @@ impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let op_str = match &self.op_code {
             OpCode::Return => "RETURN".to_string(),
-            OpCode::Value(value) => format!("VALUE {:?}", value),
+            OpCode::Value(value) => match value {
+                Value::Function(function) => format!(
+                    "VALUE fn({}):\n{}",
+                    function.name,
+                    function
+                        .chunk
+                        .disassemble(&function.name)
+                        .trim_end()
+                        .split('\n')
+                        .map(|line| format!("  {}", line))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ),
+                _ => format!("VALUE {:?}", value),
+            },
             OpCode::Negate => "NEGATE".to_string(),
             OpCode::Add => "ADD".to_string(),
             OpCode::Subtract => "SUBTRACT".to_string(),
@@ -73,28 +77,23 @@ impl fmt::Display for Instruction {
             OpCode::JumpIfFalse(offset) => format!("JUMP_IF_FALSE {}", offset),
             OpCode::Jump(offset) => format!("JUMP {}", offset),
             OpCode::Loop(offset) => format!("LOOP {}", offset),
+            OpCode::Call(arg_count) => format!("CALL {}", arg_count),
         };
 
         write!(f, "line {:3}: {}", self.line, op_str)
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Chunk {
     instructions: Vec<Instruction>,
-    ip: usize,
 }
 
 impl Chunk {
     pub fn new() -> Chunk {
         Chunk {
             instructions: Vec::new(),
-            ip: 0,
         }
-    }
-
-    pub fn push(&mut self, instruction: Instruction) {
-        self.instructions.push(instruction);
     }
 
     pub fn extend(&mut self, instructions: Vec<Instruction>) {
@@ -112,26 +111,11 @@ impl Chunk {
         result
     }
 
-    pub fn next_instruction(&mut self) -> Option<&Instruction> {
-        if self.ip < self.instructions.len() {
-            let instruction = &self.instructions[self.ip];
-            self.ip += 1;
-            Some(instruction)
-        } else {
-            None
-        }
+    pub fn get_instruction(&self, ip: usize) -> Option<&Instruction> {
+        self.instructions.get(ip)
     }
 
-    pub fn offset(&mut self, distance: usize) {
-        self.ip += distance
-    }
-
-    pub fn offset_backward(&mut self, distance: usize) {
-        assert!(
-            distance <= self.ip,
-            "Attempted to jump before start of chunk"
-        );
-
-        self.ip -= distance
+    pub fn get_last_instruction(&self) -> Option<&Instruction> {
+        self.instructions.last()
     }
 }

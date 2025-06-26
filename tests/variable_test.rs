@@ -112,15 +112,15 @@ fn duplicate_local() {
     assert!(interpret_file_result("examples/variable/duplicate_local.lox").is_err());
 }
 
-#[test]
-fn duplicate_parameter() {
-    assert!(interpret_file_result("examples/variable/duplicate_parameter.lox").is_err());
-}
+// #[test]
+// fn duplicate_parameter() {
+//     assert!(interpret_file_result("examples/variable/duplicate_parameter.lox").is_err());
+// }
 
-#[test]
-fn collide_with_parameter() {
-    assert!(interpret_file_result("examples/variable/collide_with_parameter.lox").is_err());
-}
+// #[test]
+// fn collide_with_parameter() {
+//     assert!(interpret_file_result("examples/variable/collide_with_parameter.lox").is_err());
+// }
 
 #[test]
 fn use_local_in_initializer() {

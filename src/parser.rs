@@ -1,7 +1,11 @@
+use std::mem;
+use std::rc::Rc;
+use std::vec;
+
 use crate::{
-    chunk::{Instruction, OpCode},
+    chunk::{Chunk, Instruction, OpCode},
+    function::{Function, FunctionType},
     lexical_scope::LexicalScopeRegistry,
-    logger,
     scanner::{Scanner, Token, TokenType},
     value::Value,
 };
@@ -13,6 +17,7 @@ pub struct Parser<'a> {
     pub error: Option<String>,
     panic_mode: bool,
     lexical_scope_registry: LexicalScopeRegistry,
+    function_types: Vec<FunctionType>,
 }
 
 impl<'a> Parser<'a> {
@@ -25,19 +30,22 @@ impl<'a> Parser<'a> {
             error: None,
             panic_mode: false,
             lexical_scope_registry: LexicalScopeRegistry::new(),
+            function_types: Vec::new(),
         }
     }
 
     pub fn parse(&mut self) -> Result<Vec<Instruction>, String> {
-        logger::debug("parse");
-
         let mut operations = Vec::new();
+
+        self.function_types.push(FunctionType::Script);
 
         while !self.is_at_end() {
             operations.extend(self.declaration()?);
         }
 
         self.consume(TokenType::Eof, "Expected end of file")?;
+
+        self.function_types.pop();
 
         Ok(operations)
     }
@@ -49,11 +57,11 @@ impl<'a> Parser<'a> {
     }
 
     fn declaration(&mut self) -> Result<Vec<Instruction>, String> {
-        logger::debug("declaration");
-
         let result;
 
-        if self.match_token(TokenType::Var)? {
+        if self.match_token(TokenType::Fun)? {
+            result = self.fun_declaration();
+        } else if self.match_token(TokenType::Var)? {
             result = self.var_declaration();
         } else {
             result = self.statement();
@@ -66,20 +74,97 @@ impl<'a> Parser<'a> {
         result
     }
 
+    fn fun_declaration(&mut self) -> Result<Vec<Instruction>, String> {
+        let name = self.parse_variable("Expect function name")?;
+
+        self.function_types.push(FunctionType::Function);
+
+        let function = self.function(name.clone(), FunctionType::Function)?;
+        let variable = self.define_variable(
+            name.clone(),
+            self.previous.ok_or("Unexpected end of input")?.line,
+        )?;
+
+        self.function_types.pop();
+
+        Ok([function, variable].concat())
+    }
+
+    fn function(
+        &mut self,
+        name: String,
+        function_type: FunctionType,
+    ) -> Result<Vec<Instruction>, String> {
+        let saved_registry = mem::take(&mut self.lexical_scope_registry);
+        self.lexical_scope_registry = LexicalScopeRegistry::new();
+        self.lexical_scope_registry.add_local("".to_string())?;
+
+        self.consume(TokenType::LeftParen, "Expect '(' after function name")?;
+        let mut arity = 0;
+
+        self.begin_scope();
+        // Handle 0 arguments: only enter the loop if the next token is not ')'
+        if !self.check(TokenType::RightParen) {
+            loop {
+                let param_token = self.consume(TokenType::Identifier, "Expect parameter name")?;
+                let param_name = param_token.lexeme.to_string();
+
+                self.lexical_scope_registry.add_local(param_name)?;
+                self.lexical_scope_registry.mark_initialized()?;
+
+                arity += 1;
+
+                if arity > 255 {
+                    return Err(format!("Cannot have more than 255 parameters"));
+                }
+
+                if !self.match_token(TokenType::Comma)? {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenType::RightParen, "Expect ')' after parameters")?;
+        self.consume(TokenType::LeftBrace, "Expect '{' before function body")?;
+
+        let block = self.block()?;
+        let mut chunk = Chunk::new();
+        chunk.extend(block);
+        self.end_scope()?;
+
+        let line = self.previous.ok_or("Unexpected end of input")?.line;
+
+        if !matches!(
+            chunk.get_last_instruction().map(|i| &i.op_code),
+            Some(OpCode::Return)
+        ) {
+            chunk.extend(vec![
+                Instruction::new(OpCode::Value(Value::Nil), line),
+                Instruction::new(OpCode::Return, line),
+            ]);
+        }
+
+        self.lexical_scope_registry = saved_registry;
+
+        let function = Function {
+            name: name.to_string(),
+            arity,
+            function_type,
+            chunk,
+        };
+
+        Ok(vec![Instruction::new(
+            OpCode::Value(Value::Function(Rc::new(function))),
+            line,
+        )])
+    }
+
     fn var_declaration(&mut self) -> Result<Vec<Instruction>, String> {
-        logger::debug("var_declaration");
-
         let depth = self.lexical_scope_registry.depth;
-        let identifier = self.consume(TokenType::Identifier, "Expect variable name")?;
-
-        let name = identifier.lexeme.to_string();
-        let line = identifier.line;
+        let name = self.parse_variable("Expect variable name")?;
+        let line = self.previous.ok_or("Unexpected end of input")?.line;
 
         let mut operations = Vec::new();
-
-        if depth > 0 {
-            self.declare_variable(name.clone())?;
-        }
 
         let match_equal = self.match_token(TokenType::Equal)?;
         if match_equal {
@@ -93,12 +178,10 @@ impl<'a> Parser<'a> {
             "Expect ';' after variable declaration",
         )?;
 
+        operations.extend(self.define_variable(name, line)?);
         if depth > 0 {
-            self.lexical_scope_registry.mark_initialized()?;
             return Ok(operations);
         }
-
-        operations.push(Instruction::new(OpCode::DefineGlobal(name), line));
 
         if match_equal {
             operations.push(Instruction::new(OpCode::Pop, line));
@@ -107,6 +190,45 @@ impl<'a> Parser<'a> {
         Ok(operations)
     }
 
+    /// Parses a variable name, declares it if in a local scope, and returns the name.
+    fn parse_variable(&mut self, error_message: &str) -> Result<String, String> {
+        let identifier = self.consume(TokenType::Identifier, error_message)?;
+        let name = identifier.lexeme.to_string();
+
+        if self.lexical_scope_registry.depth > 0 {
+            self.declare_variable(name.clone())?;
+        }
+
+        Ok(name)
+    }
+
+    /// Defines a variable: if in a local scope, marks it initialized; if global, emits a DefineGlobal instruction.
+    /// Returns any instructions to emit (for global scope), or an empty Vec for local scope.
+    fn define_variable(&mut self, name: String, line: usize) -> Result<Vec<Instruction>, String> {
+        if self.lexical_scope_registry.depth > 0 {
+            self.lexical_scope_registry.mark_initialized()?;
+            Ok(vec![])
+        } else {
+            Ok(vec![Instruction::new(OpCode::DefineGlobal(name), line)])
+        }
+    }
+
+    /// Declares a new variable in the current scope.
+    ///
+    /// Checks if a variable with the same name already exists in the current lexical scope.
+    /// If so, returns an error. Otherwise, adds the variable to the local scope registry.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the variable to declare.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the variable is already declared in the current scope.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the variable was successfully declared, or an error message otherwise.
     fn declare_variable(&mut self, name: String) -> Result<(), String> {
         for variable in self.lexical_scope_registry.iter() {
             match variable.depth {
@@ -127,14 +249,16 @@ impl<'a> Parser<'a> {
     }
 
     fn statement(&mut self) -> Result<Vec<Instruction>, String> {
-        logger::debug("statement");
-
         if self.match_token(TokenType::Print)? {
             return self.print_statement();
         }
 
         if self.match_token(TokenType::If)? {
             return self.if_statement();
+        }
+
+        if self.match_token(TokenType::Return)? {
+            return self.return_statement();
         }
 
         if self.match_token(TokenType::While)? {
@@ -151,8 +275,6 @@ impl<'a> Parser<'a> {
             self.begin_scope();
             operations = self.block()?;
             operations.extend(self.end_scope()?);
-
-            logger::debug("END BLOCK");
         } else {
             operations.extend(self.expression_statement()?);
         }
@@ -161,8 +283,6 @@ impl<'a> Parser<'a> {
     }
 
     fn print_statement(&mut self) -> Result<Vec<Instruction>, String> {
-        logger::debug("print_statement");
-
         let mut operations = self.expression()?;
         operations.push(Instruction::new(OpCode::Print, self.get_line()?));
 
@@ -172,8 +292,6 @@ impl<'a> Parser<'a> {
     }
 
     fn if_statement(&mut self) -> Result<Vec<Instruction>, String> {
-        logger::debug("if_statement");
-
         self.consume(TokenType::LeftParen, "Expect '(' after 'if'")?;
         let mut operations = self.expression()?;
         self.consume(TokenType::RightParen, "Expect ')' after if condition")?;
@@ -201,6 +319,31 @@ impl<'a> Parser<'a> {
         } else {
             operations.push(Instruction::new(OpCode::Jump(1), self.get_line()?));
             operations.push(Instruction::new(OpCode::Pop, self.get_line()?));
+        }
+
+        Ok(operations)
+    }
+
+    fn return_statement(&mut self) -> Result<Vec<Instruction>, String> {
+        let mut operations = vec![];
+
+        match self.function_types.last() {
+            Some(FunctionType::Script) => {
+                return Err("Cannot return from top-level code.".to_string());
+            }
+            _ => (),
+        }
+
+        if self.match_token(TokenType::Semicolon)? {
+            operations.push(Instruction::new(
+                OpCode::Value(Value::Nil),
+                self.get_line()?,
+            ));
+            operations.push(Instruction::new(OpCode::Return, self.get_line()?));
+        } else {
+            operations.append(&mut self.expression()?);
+            self.consume(TokenType::Semicolon, "Expect ';' after return value.")?;
+            operations.push(Instruction::new(OpCode::Return, self.get_line()?));
         }
 
         Ok(operations)
@@ -287,8 +430,6 @@ impl<'a> Parser<'a> {
     }
 
     fn block(&mut self) -> Result<Vec<Instruction>, String> {
-        logger::debug("block");
-
         let mut operations = Vec::new();
 
         while !self.check(TokenType::RightBrace) && !self.is_at_end() {
@@ -334,8 +475,6 @@ impl<'a> Parser<'a> {
     }
 
     fn expression_statement(&mut self) -> Result<Vec<Instruction>, String> {
-        logger::debug("expression_statement");
-
         let mut operations = self.expression()?;
 
         self.consume(TokenType::Semicolon, "Expect ';' after expression")?;
@@ -350,8 +489,6 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_precedence(&mut self, precedence: Precedence) -> Result<Vec<Instruction>, String> {
-        logger::debug(&format!("parse_precedence: {:?}", precedence));
-
         self.advance()?;
 
         let previous = self
@@ -363,11 +500,6 @@ impl<'a> Parser<'a> {
             previous.token_type
         ))?;
 
-        logger::debug(&format!(
-            "Found prefix operation for previous token_type {:?}",
-            previous.token_type
-        ));
-
         let can_assign = !precedence.greater_than(Precedence::Assignment);
         let mut operations = match prefix {
             PrefixParseFn::ParseFn(f) => f(self)?,
@@ -375,48 +507,24 @@ impl<'a> Parser<'a> {
         };
 
         loop {
-            logger::debug(&format!(
-                "parse_precedence: {:?} next iteration",
-                precedence
-            ));
             let current = self
                 .current
                 .ok_or("Expected expression, but reached end of file")?;
             let next_precedence = self.get_rule(current.token_type).precedence;
 
-            logger::debug(&format!("  current: {:?}", current));
-            logger::debug(&format!("  next_precedence: {:?}", next_precedence));
-
             if precedence.greater_than(next_precedence) {
-                logger::debug(&format!(
-                    "Precedence {:?} is > than {:?}, breaking the loop",
-                    precedence, next_precedence
-                ));
                 break;
-            } else {
-                logger::debug(&format!(
-                    "Precedence {:?} is <= than {:?}, continuing the loop",
-                    precedence, next_precedence
-                ));
             }
-
             self.advance()?;
 
             let infix = self.get_rule(current.token_type).infix;
 
             if let Some(infix) = infix {
-                logger::debug(&format!(
-                    "Found infix operation for current token_type {:?}",
-                    current.token_type
-                ));
-
                 match infix {
                     InfixParseFn::ParseFn(f) => {
                         operations.extend(f(self)?);
                     }
                 }
-            } else {
-                logger::debug(&format!("No infix rule found for {:?}", current.token_type));
             }
         }
 
@@ -472,10 +580,6 @@ impl<'a> Parser<'a> {
             self.error_at(&next, "Unexpected token")?;
         }
 
-        logger::debug("advance - after");
-        logger::debug(&format!("  previous: {:?}", self.previous));
-        logger::debug(&format!("  current: {:?}", self.current));
-
         match self.error {
             Some(ref e) => Err(e.to_string()),
             None => Ok(()),
@@ -492,12 +596,13 @@ impl<'a> Parser<'a> {
             Box::new(|parser: &mut Parser, can_assign: bool| parser.variable(can_assign));
         let and = Box::new(|parser: &mut Parser| parser.and());
         let or = Box::new(|parser: &mut Parser| parser.or());
+        let call = Box::new(|parser: &mut Parser| parser.call());
 
         match operator {
             TokenType::LeftParen => ParseRule {
                 prefix: Some(PrefixParseFn::ParseFn(grouping)),
-                infix: None,
-                precedence: Precedence::None,
+                infix: Some(InfixParseFn::ParseFn(call)),
+                precedence: Precedence::Call,
             },
             TokenType::Minus => ParseRule {
                 prefix: Some(PrefixParseFn::ParseFn(unary)),
@@ -566,8 +671,6 @@ impl<'a> Parser<'a> {
     }
 
     fn grouping(&mut self) -> Result<Vec<Instruction>, String> {
-        logger::debug("grouping");
-
         let expression = self.expression()?;
 
         self.consume(
@@ -579,8 +682,6 @@ impl<'a> Parser<'a> {
     }
 
     fn and(&mut self) -> Result<Vec<Instruction>, String> {
-        logger::debug("and");
-
         let mut expression = self.parse_precedence(Precedence::And)?;
         let mut operations = vec![Instruction::new(
             OpCode::JumpIfFalse(expression.len()),
@@ -592,8 +693,6 @@ impl<'a> Parser<'a> {
     }
 
     fn or(&mut self) -> Result<Vec<Instruction>, String> {
-        logger::debug("or");
-
         let mut operations = vec![Instruction::new(OpCode::JumpIfFalse(1), self.get_line()?)];
 
         let mut expression = self.parse_precedence(Precedence::Or)?;
@@ -608,8 +707,6 @@ impl<'a> Parser<'a> {
     }
 
     fn binary(&mut self) -> Result<Vec<Instruction>, String> {
-        logger::debug("binary");
-
         let previous = self
             .previous
             .ok_or("Expected binary operator, found nothing")?;
@@ -650,8 +747,6 @@ impl<'a> Parser<'a> {
     }
 
     fn unary(&mut self) -> Result<Vec<Instruction>, String> {
-        logger::debug("unary");
-
         let previous = self
             .previous
             .ok_or("No operand found when parsing unary expression")?;
@@ -673,8 +768,6 @@ impl<'a> Parser<'a> {
     }
 
     fn number(&mut self) -> Result<Vec<Instruction>, String> {
-        logger::debug("number");
-
         let previous = self
             .previous
             .ok_or("Expected number when parsing number, found nothing")?;
@@ -692,8 +785,6 @@ impl<'a> Parser<'a> {
     }
 
     fn literal(&mut self) -> Result<Vec<Instruction>, String> {
-        logger::debug("literal");
-
         let previous = self.previous.ok_or("Expected literal, found nothing")?;
         let lexeme = previous.lexeme;
         let line = previous.line;
@@ -705,7 +796,7 @@ impl<'a> Parser<'a> {
             )]),
             TokenType::Nil => Ok(vec![Instruction::new(OpCode::Value(Value::Nil), line)]),
             TokenType::String => Ok(vec![Instruction::new(
-                OpCode::Value(Value::String(lexeme.to_string())),
+                OpCode::Value(Value::String(Rc::new(lexeme.to_string()))),
                 line,
             )]),
             _ => Err(format!(
@@ -715,9 +806,22 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parses a variable expression.
+    ///
+    /// This function is called when encountering a variable in an expression.
+    /// The `can_assign` parameter indicates whether the variable is a valid assignment target
+    /// in the current context (e.g., on the left side of an assignment).
+    ///
+    /// # Arguments
+    ///
+    /// * `can_assign` - If `true`, assignment to this variable is allowed (e.g., in `var a = 1;`).
+    ///                  If `false`, assignment is not allowed (e.g., in `a + 1`).
+    ///
+    /// # Returns
+    ///
+    /// Returns a vector of `Instruction` representing the code to access or assign to the variable,
+    /// or an error if the variable name is missing.
     fn variable(&mut self, can_assign: bool) -> Result<Vec<Instruction>, String> {
-        logger::debug("variable");
-
         let previous = self
             .previous
             .ok_or("Expected variable name, found nothing")?;
@@ -728,14 +832,21 @@ impl<'a> Parser<'a> {
         self.named_variable(name, line, can_assign)
     }
 
+    fn call(&mut self) -> Result<Vec<Instruction>, String> {
+        let (mut instructions, count) = self.arguments()?;
+        let line = self.previous.ok_or("Unexpected end of input")?.line;
+
+        instructions.push(Instruction::new(OpCode::Call(count), line));
+
+        Ok(instructions)
+    }
+
     fn named_variable(
         &mut self,
         name: &str,
         line: usize,
         can_assign: bool,
     ) -> Result<Vec<Instruction>, String> {
-        logger::debug("named_variable");
-
         let mut set_operation = OpCode::SetGlobal(name.to_string());
         let mut get_operation = OpCode::GetGlobal(name.to_string());
 
@@ -751,6 +862,26 @@ impl<'a> Parser<'a> {
         }
 
         Ok(vec![Instruction::new(get_operation, line)])
+    }
+
+    fn arguments(&mut self) -> Result<(Vec<Instruction>, usize), String> {
+        let mut arguments = Vec::new();
+        let mut count = 0;
+
+        if !self.match_token(TokenType::RightParen)? {
+            loop {
+                count += 1;
+                let arg = self.expression()?;
+                arguments.extend(arg);
+
+                if !self.match_token(TokenType::Comma)? {
+                    self.consume(TokenType::RightParen, "Expected ')' after arguments.")?;
+                    break;
+                }
+            }
+        }
+
+        Ok((arguments, count))
     }
 
     fn match_token(&mut self, token_type: TokenType) -> Result<bool, String> {

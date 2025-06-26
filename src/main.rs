@@ -1,7 +1,9 @@
+mod call_frame;
 mod chunk;
-mod compiler;
+mod function;
 mod lexical_scope;
 mod logger;
+mod native_functions;
 mod parser;
 mod run;
 mod scanner;

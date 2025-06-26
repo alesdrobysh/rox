@@ -1,7 +1,9 @@
+pub mod call_frame;
 pub mod chunk;
-pub mod compiler;
+pub mod function;
 pub mod lexical_scope;
 pub mod logger;
+pub mod native_functions;
 pub mod parser;
 pub mod run;
 pub mod scanner;

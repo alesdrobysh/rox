@@ -1,4 +1,15 @@
-var a = 1;
-a = 2;
-a = a + 1;
-print(a);
+fun fib(n) {
+    if (n == 0) return 0;
+    if (n == 1) return 1;
+
+    return fib(n - 1) + fib(n - 2);
+}
+
+fun main() {
+    print fib(15);
+}
+
+var start = clock();
+main();
+var end = clock();
+print(end - start);

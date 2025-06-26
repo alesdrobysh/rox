@@ -1,8 +1,11 @@
-use crate::chunk::{Chunk, OpCode};
-use crate::logger;
+use crate::call_frame::CallFrame;
+use crate::chunk::{Instruction, OpCode};
+use crate::function::NativeFunction;
+use crate::native_functions::clock;
 use crate::value::Value;
 use std::collections::HashMap;
 use std::io::{self, Write};
+use std::rc::Rc;
 
 #[derive(Debug)]
 pub enum InterpretError {
@@ -23,83 +26,158 @@ impl std::fmt::Display for InterpretError {
 
 pub type InterpretResult = Result<(), InterpretError>;
 
+pub type CallFrameStack = Vec<CallFrame>;
+
+pub fn format_stack(stack: &Vec<Value>) -> String {
+    stack
+        .iter()
+        .map(|value| format!("{}", value))
+        .collect::<Vec<String>>()
+        .join(", ")
+}
+
 #[derive(Debug)]
 pub struct VM {
     stack: Vec<Value>,
     globals: HashMap<String, Value>,
+    call_frame_stack: CallFrameStack,
 }
 
 impl VM {
     pub fn new() -> VM {
+        let mut globals = HashMap::new();
+        globals.insert(
+            "clock".to_string(),
+            Value::NativeFunction(Rc::new(NativeFunction::new("clock", clock))),
+        );
+
         VM {
             stack: Vec::new(),
-            globals: HashMap::new(),
+            globals,
+            call_frame_stack: CallFrameStack::new(),
         }
     }
 
-    pub fn interpret(&mut self, chunk: &mut Chunk) -> InterpretResult {
-        self.run(chunk)
+    pub fn push_frame(&mut self, frame: CallFrame) {
+        self.call_frame_stack.push(frame);
     }
 
-    fn run(&mut self, chunk: &mut Chunk) -> InterpretResult {
-        loop {
-            let instruction = chunk
-                .next_instruction()
-                .ok_or(InterpretError::RuntimeError(
-                    "No more instructions".to_string(),
-                    0,
-                ))?;
+    pub fn interpret(&mut self) -> InterpretResult {
+        self.run()
+    }
 
-            logger::debug(&format!("{:?}", instruction));
+    fn next_instruction(&mut self) -> Option<&Instruction> {
+        self.call_frame_stack.last_mut()?.next_instruction()
+    }
+
+    fn offset(&mut self, offset: usize) {
+        if let Some(frame) = self.call_frame_stack.last_mut() {
+            frame.offset(offset);
+        }
+    }
+
+    fn offset_backward(&mut self, offset: usize) {
+        if let Some(frame) = self.call_frame_stack.last_mut() {
+            frame.offset_backward(offset);
+        }
+    }
+
+    fn run(&mut self) -> InterpretResult {
+        loop {
+            let instruction = match self.next_instruction() {
+                Some(instr) => instr.clone(),
+                None => return self.runtime_error("No more instructions", 0),
+            };
 
             let line = instruction.line;
             match &instruction.op_code {
-                OpCode::Return => return Ok(()),
+                OpCode::Return => match self.call_frame_stack.pop() {
+                    Some(frame) => {
+                        if self.call_frame_stack.is_empty() {
+                            return Ok(());
+                        }
+
+                        let result = self.pop_stack(line)?;
+                        self.stack.truncate(frame.slot_start);
+                        self.push_stack(result);
+                    }
+                    None => return self.runtime_error("No call frame to return from", line),
+                },
+                OpCode::Call(arg_count) => {
+                    let arg_count = *arg_count;
+
+                    let callee_index = self.stack.len() - arg_count - 1;
+                    let callee = self.stack[callee_index].clone();
+
+                    match callee {
+                        Value::Function(func) => {
+                            if func.arity != arg_count {
+                                return self.runtime_error(
+                                    &format!(
+                                        "Expected {} arguments but got {}",
+                                        func.arity, arg_count
+                                    ),
+                                    line,
+                                );
+                            }
+
+                            self.call_frame_stack.push(CallFrame {
+                                func,
+                                ip: 0,
+                                slot_start: callee_index,
+                            });
+                        }
+
+                        Value::NativeFunction(native) => {
+                            let args_start = callee_index + 1;
+                            let args: Vec<Value> = self.stack[args_start..].to_vec();
+
+                            self.stack.truncate(callee_index);
+
+                            let result = (native.function)(args);
+                            self.push_stack(result);
+                        }
+
+                        _ => return self.runtime_error("Cannot call non-function value", line),
+                    }
+                }
                 OpCode::Value(value) => {
                     self.push_stack(value.clone());
                 }
                 OpCode::Negate => match self.stack.pop() {
                     Some(Value::Number(value)) => self.push_stack(Value::Number(-value)),
-                    Some(_) => {
-                        return Err(InterpretError::RuntimeError(
-                            "Cannot negate non-number value".to_string(),
-                            line,
-                        ))
-                    }
-                    None => {
-                        return Err(InterpretError::RuntimeError(
-                            "Not enough values to negate".to_string(),
-                            line,
-                        ))
-                    }
+                    Some(_) => return self.runtime_error("Cannot negate non-number value", line),
+                    None => return self.runtime_error("Not enough values to negate", line),
                 },
                 OpCode::Add => match (self.pop_stack(line)?, self.pop_stack(line)?) {
                     (Value::Number(b), Value::Number(a)) => self.push_stack(Value::Number(a + b)),
                     (Value::String(b), Value::String(a)) => {
-                        self.push_stack(Value::String(format!("{}{}", a, b)))
+                        self.push_stack(Value::String(Rc::new(format!("{}{}", a, b))))
                     }
-                    _ => {
-                        return Err(InterpretError::RuntimeError(
-                            "Operands must be numbers or strings".to_string(),
+                    (a, b) => {
+                        return self.runtime_error(
+                            &format!(
+                                "Operands must be numbers or strings, found: {} and {}",
+                                a, b
+                            ),
                             line,
-                        ))
+                        );
                     }
                 },
                 OpCode::Subtract => self.binary_op(|a, b| Ok(Value::Number(a - b)), line)?,
                 OpCode::Multiply => self.binary_op(|a, b| Ok(Value::Number(a * b)), line)?,
-                OpCode::Divide => self.binary_op(
-                    |a, b| {
+                OpCode::Divide => {
+                    if let (Value::Number(b), Value::Number(a)) =
+                        (self.pop_stack(line)?, self.pop_stack(line)?)
+                    {
                         if b == 0.0 {
-                            return Err(InterpretError::RuntimeError(
-                                "Division by zero".to_string(),
-                                line,
-                            ));
+                            return self.runtime_error("Division by zero", line);
                         }
-
-                        Ok(Value::Number(a / b))
-                    },
-                    line,
-                )?,
+                        self.push_stack(Value::Number(a / b));
+                    } else {
+                        return self.runtime_error("Operands must be numbers", line);
+                    }
+                }
                 OpCode::Not => {
                     let value = self.pop_stack(line)?;
                     self.push_stack(Value::Bool(value.is_falsey()));
@@ -133,42 +211,44 @@ impl VM {
                     self.globals.insert(name.clone(), value);
                 }
                 OpCode::GetGlobal(name) => {
-                    let value = self.globals.get(name).ok_or(InterpretError::RuntimeError(
-                        format!("Undefined variable '{}'", name),
-                        line,
-                    ))?;
+                    let value = match self.globals.get(name) {
+                        Some(val) => val,
+                        None => {
+                            return self
+                                .runtime_error(&format!("Undefined variable '{}'", name), line);
+                        }
+                    };
 
                     self.stack.push(value.clone());
                 }
                 OpCode::SetGlobal(name) => {
                     if !self.globals.contains_key(&name[..]) {
-                        return Err(InterpretError::RuntimeError(
-                            format!("Undefined variable '{}'", name),
-                            line,
-                        ));
+                        return self.runtime_error(&format!("Undefined variable '{}'", name), line);
                     }
                     let value = self.peek_stack(line)?;
                     self.globals.insert(name.clone(), value);
                 }
                 OpCode::SetLocal(local) => {
-                    if *local >= self.stack.len() {
-                        return Err(InterpretError::RuntimeError(
-                            format!("Invalid local variable index {}", local),
+                    let absolute_index = self.to_absolute_index(*local);
+                    if absolute_index >= self.stack.len() {
+                        return self.runtime_error(
+                            &format!("Invalid local variable index {}", local),
                             line,
-                        ));
+                        );
                     }
 
-                    self.stack[*local] = self.peek_stack(line)?;
+                    self.stack[absolute_index] = self.peek_stack(line)?;
                 }
                 OpCode::GetLocal(index) => {
-                    if *index >= self.stack.len() {
-                        return Err(InterpretError::RuntimeError(
-                            format!("Local variable access out of bounds: index {}", index),
+                    let absolute_index = self.to_absolute_index(*index);
+                    if absolute_index >= self.stack.len() {
+                        return self.runtime_error(
+                            &format!("Invalid local variable index {}", index),
                             line,
-                        ));
+                        );
                     }
 
-                    let value = self.stack[*index].clone();
+                    let value = self.stack[absolute_index].clone();
                     self.push_stack(value);
                 }
                 OpCode::Pop => {
@@ -181,19 +261,23 @@ impl VM {
                         0
                     };
 
-                    chunk.offset(effective_offset);
+                    self.offset(effective_offset);
                 }
                 OpCode::Jump(offset) => {
                     let offset = *offset;
-                    chunk.offset(offset);
+                    self.offset(offset);
                 }
                 OpCode::Loop(offset) => {
                     let offset = *offset;
-                    chunk.offset_backward(offset);
+                    self.offset_backward(offset);
                 }
             }
 
-            logger::debug(&format!("{:?}", self.stack));
+            if let Ok(level) = std::env::var("DEBUG") {
+                if level == "debug" {
+                    eprintln!("{}", format_stack(&self.stack));
+                }
+            }
         }
     }
 
@@ -206,29 +290,65 @@ impl VM {
                 self.push_stack(op(a, b)?);
                 Ok(())
             }
-            (_, _) => Err(InterpretError::RuntimeError(
-                "Operands must be numbers".to_string(),
-                line,
-            )),
+            (_, _) => self.runtime_error("Operands must be numbers", line),
         }
     }
 
     fn pop_stack(&mut self, line: usize) -> Result<Value, InterpretError> {
-        self.stack.pop().ok_or(InterpretError::RuntimeError(
-            "Stack is empty, cannot pop".to_string(),
-            line,
-        ))
+        match self.stack.pop() {
+            Some(value) => Ok(value),
+            None => {
+                self.runtime_error("Stack is empty, cannot pop", line)?;
+                unreachable!()
+            }
+        }
     }
 
     fn peek_stack(&mut self, line: usize) -> Result<Value, InterpretError> {
-        let top = self.stack.last().ok_or(InterpretError::RuntimeError(
-            "Stack is empty, cannot peek".to_string(),
-            line,
-        ))?;
-        Ok(top.clone())
+        match self.stack.last() {
+            Some(value) => Ok(value.clone()),
+            None => {
+                self.runtime_error("Stack is empty, cannot peek", line)?;
+                unreachable!()
+            }
+        }
     }
 
     fn push_stack(&mut self, value: Value) {
         self.stack.push(value)
+    }
+
+    fn runtime_error(&mut self, message: &str, line: usize) -> InterpretResult {
+        let stacktrace = self
+            .call_frame_stack
+            .iter()
+            .map(|frame| {
+                format!(
+                    "[line {}] in {}",
+                    frame
+                        .func
+                        .chunk
+                        .get_instruction(frame.ip)
+                        .map(|instruction| instruction.line)
+                        .unwrap_or(0),
+                    frame.func.name
+                )
+            })
+            .rev()
+            .collect::<Vec<String>>();
+
+        Err(InterpretError::RuntimeError(
+            format!("{}\n{}", message, stacktrace.join("\n")),
+            line,
+        ))
+    }
+
+    fn to_absolute_index(&self, index: usize) -> usize {
+        if let Some(frame) = self.call_frame_stack.last() {
+            let shift = frame.slot_start;
+            return index + shift;
+        }
+
+        return index;
     }
 }

@@ -7,3 +7,6 @@ edition = "2021"
 
 [dev-dependencies]
 gag = "1.0.0"
+
+[profile.dev]
+opt-level = 3
