@@ -16,7 +16,7 @@ impl Clone for Variable {
 }
 
 #[derive(Debug, Default)]
-pub struct LexicalScopeRegistry {
+pub struct CompilationContext {
     variables: Vec<Variable>,
     pub depth: usize,
 }

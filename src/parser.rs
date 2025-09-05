@@ -5,7 +5,7 @@ use std::vec;
 use crate::{
     chunk::{Chunk, Instruction, OpCode},
     function::{Function, FunctionType},
-    lexical_scope::LexicalScopeRegistry,
+    compilation_context::CompilationContext,
     scanner::{Scanner, Token, TokenType},
     value::Value,
 };
@@ -16,7 +16,7 @@ pub struct Parser<'a> {
     pub previous: Option<Token<'a>>,
     pub error: Option<String>,
     panic_mode: bool,
-    lexical_scope_registry: LexicalScopeRegistry,
+    compilation_context: CompilationContext,
     function_types: Vec<FunctionType>,
 }
 
@@ -29,7 +29,7 @@ impl<'a> Parser<'a> {
             previous: None,
             error: None,
             panic_mode: false,
-            lexical_scope_registry: LexicalScopeRegistry::new(),
+            compilation_context: CompilationContext::new(),
             function_types: Vec::new(),
         }
     }
@@ -95,9 +95,9 @@ impl<'a> Parser<'a> {
         name: String,
         function_type: FunctionType,
     ) -> Result<Vec<Instruction>, String> {
-        let saved_registry = mem::take(&mut self.lexical_scope_registry);
-        self.lexical_scope_registry = LexicalScopeRegistry::new();
-        self.lexical_scope_registry.add_local("".to_string())?;
+        let saved_registry = mem::take(&mut self.compilation_context);
+        self.compilation_context = CompilationContext::new();
+        self.compilation_context.add_local("".to_string())?;
 
         self.consume(TokenType::LeftParen, "Expect '(' after function name")?;
         let mut arity = 0;
@@ -109,8 +109,8 @@ impl<'a> Parser<'a> {
                 let param_token = self.consume(TokenType::Identifier, "Expect parameter name")?;
                 let param_name = param_token.lexeme.to_string();
 
-                self.lexical_scope_registry.add_local(param_name)?;
-                self.lexical_scope_registry.mark_initialized()?;
+                self.compilation_context.add_local(param_name)?;
+                self.compilation_context.mark_initialized()?;
 
                 arity += 1;
 
@@ -144,7 +144,7 @@ impl<'a> Parser<'a> {
             ]);
         }
 
-        self.lexical_scope_registry = saved_registry;
+        self.compilation_context = saved_registry;
 
         let function = Function {
             name: name.to_string(),
@@ -160,7 +160,7 @@ impl<'a> Parser<'a> {
     }
 
     fn var_declaration(&mut self) -> Result<Vec<Instruction>, String> {
-        let depth = self.lexical_scope_registry.depth;
+        let depth = self.compilation_context.depth;
         let name = self.parse_variable("Expect variable name")?;
         let line = self.previous.ok_or("Unexpected end of input")?.line;
 
@@ -195,7 +195,7 @@ impl<'a> Parser<'a> {
         let identifier = self.consume(TokenType::Identifier, error_message)?;
         let name = identifier.lexeme.to_string();
 
-        if self.lexical_scope_registry.depth > 0 {
+        if self.compilation_context.depth > 0 {
             self.declare_variable(name.clone())?;
         }
 
@@ -205,8 +205,8 @@ impl<'a> Parser<'a> {
     /// Defines a variable: if in a local scope, marks it initialized; if global, emits a DefineGlobal instruction.
     /// Returns any instructions to emit (for global scope), or an empty Vec for local scope.
     fn define_variable(&mut self, name: String, line: usize) -> Result<Vec<Instruction>, String> {
-        if self.lexical_scope_registry.depth > 0 {
-            self.lexical_scope_registry.mark_initialized()?;
+        if self.compilation_context.depth > 0 {
+            self.compilation_context.mark_initialized()?;
             Ok(vec![])
         } else {
             Ok(vec![Instruction::new(OpCode::DefineGlobal(name), line)])
@@ -230,10 +230,10 @@ impl<'a> Parser<'a> {
     ///
     /// Returns `Ok(())` if the variable was successfully declared, or an error message otherwise.
     fn declare_variable(&mut self, name: String) -> Result<(), String> {
-        for variable in self.lexical_scope_registry.iter() {
+        for variable in self.compilation_context.iter() {
             match variable.depth {
                 Some(depth)
-                    if depth == self.lexical_scope_registry.depth && variable.name == name =>
+                    if depth == self.compilation_context.depth && variable.name == name =>
                 {
                     return Err(format!(
                         "Variable '{}' already declared in this scope",
@@ -244,7 +244,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        self.lexical_scope_registry.add_local(name)?;
+        self.compilation_context.add_local(name)?;
         Ok(())
     }
 
@@ -442,32 +442,32 @@ impl<'a> Parser<'a> {
     }
 
     fn begin_scope(&mut self) {
-        self.lexical_scope_registry.increment_depth();
+        self.compilation_context.increment_depth();
     }
 
     fn end_scope(&mut self) -> Result<Vec<Instruction>, String> {
-        self.lexical_scope_registry.decrement_depth();
+        self.compilation_context.decrement_depth();
 
         let line = self.previous.ok_or("Unexpected end of input")?.line;
 
         let mut instructions = Vec::new();
 
         loop {
-            if self.lexical_scope_registry.is_empty() {
+            if self.compilation_context.is_empty() {
                 break;
             }
 
             let variable = self
-                .lexical_scope_registry
+                .compilation_context
                 .peek()
                 .ok_or("Unexpected end of input")?;
 
             match variable.depth {
-                Some(depth) if depth <= self.lexical_scope_registry.depth => break,
+                Some(depth) if depth <= self.compilation_context.depth => break,
                 _ => {}
             }
 
-            self.lexical_scope_registry.pop();
+            self.compilation_context.pop();
             instructions.push(Instruction::new(OpCode::Pop, line));
         }
 
@@ -850,7 +850,7 @@ impl<'a> Parser<'a> {
         let mut set_operation = OpCode::SetGlobal(name.to_string());
         let mut get_operation = OpCode::GetGlobal(name.to_string());
 
-        if let Some(local) = self.lexical_scope_registry.resolve_local(name)? {
+        if let Some(local) = self.compilation_context.resolve_local(name)? {
             set_operation = OpCode::SetLocal(local.clone());
             get_operation = OpCode::GetLocal(local.clone());
         }

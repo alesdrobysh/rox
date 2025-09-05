@@ -1,7 +1,7 @@
 pub mod call_frame;
 pub mod chunk;
 pub mod function;
-pub mod lexical_scope;
+pub mod compilation_context;
 pub mod logger;
 pub mod native_functions;
 pub mod parser;

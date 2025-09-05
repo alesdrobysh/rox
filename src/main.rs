@@ -1,7 +1,7 @@
 mod call_frame;
 mod chunk;
 mod function;
-mod lexical_scope;
+mod compilation_context;
 mod logger;
 mod native_functions;
 mod parser;
