@@ -15,21 +15,6 @@ impl Clone for Variable {
     }
 }
 
-#[derive(Debug, Default)]
-struct LexicalScopeRegistry {
-    variables: Vec<Variable>,
-    pub depth: usize,
-}
-
-impl LexicalScopeRegistry {
-    fn new() -> Self {
-        LexicalScopeRegistry {
-            variables: Vec::new(),
-            depth: 0,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct Upvalue {
     pub index: usize,
@@ -38,7 +23,8 @@ pub struct Upvalue {
 
 #[derive(Debug, Default)]
 pub struct CompilationContext {
-    scope_registry: LexicalScopeRegistry,
+    variables: Vec<Variable>,
+    depth: usize,
     enclosing: Option<Box<CompilationContext>>,
     pub upvalues: Vec<Upvalue>,
 }
@@ -46,45 +32,43 @@ pub struct CompilationContext {
 impl CompilationContext {
     pub fn new(enclosing: Option<Box<CompilationContext>>) -> Self {
         CompilationContext {
-            scope_registry: LexicalScopeRegistry::new(),
+            variables: Vec::new(),
+            depth: 0,
             enclosing,
             upvalues: Vec::new(),
         }
     }
 
     pub fn increment_depth(&mut self) {
-        self.scope_registry.depth += 1;
+        self.depth += 1;
     }
 
     pub fn decrement_depth(&mut self) {
-        self.scope_registry.depth -= 1;
+        self.depth -= 1;
     }
 
     pub fn add_local(&mut self, name: String) -> Result<(), String> {
-        self.scope_registry
-            .variables
-            .push(Variable { name, depth: None });
+        self.variables.push(Variable { name, depth: None });
         Ok(())
     }
 
     pub fn mark_initialized(&mut self) -> Result<(), String> {
         logger::debug("Marking variable as initialized");
 
-        if self.scope_registry.depth == 0 {
+        if self.depth == 0 {
             return Ok(());
         }
 
-        if let Some(last) = self.scope_registry.variables.last_mut() {
-            last.depth = Some(self.scope_registry.depth);
+        if let Some(last) = self.variables.last_mut() {
+            last.depth = Some(self.depth);
         }
         Ok(())
     }
 
     pub fn resolve_local(&self, name: &str) -> Result<Option<usize>, String> {
-        let length = self.scope_registry.variables.len();
+        let length = self.variables.len();
 
         let result = self
-            .scope_registry
             .variables
             .iter()
             .rev()
@@ -92,7 +76,7 @@ impl CompilationContext {
             .map(|position| length - position - 1);
 
         if let Some(position) = result {
-            if self.scope_registry.variables[position].depth.is_none() {
+            if self.variables[position].depth.is_none() {
                 return Err(format!("Variable {} is not initialized", name));
             }
         }
@@ -122,23 +106,23 @@ impl CompilationContext {
     }
 
     pub fn peek(&self) -> Option<&Variable> {
-        self.scope_registry.variables.last()
+        self.variables.last()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Variable> {
-        self.scope_registry.variables.iter()
+        self.variables.iter()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.scope_registry.variables.is_empty()
+        self.variables.is_empty()
     }
 
     pub fn pop(&mut self) {
-        self.scope_registry.variables.pop();
+        self.variables.pop();
     }
 
     pub fn get_depth(&self) -> usize {
-        self.scope_registry.depth
+        self.depth
     }
 
     pub fn take_enclosing(&mut self) -> Option<Self> {
