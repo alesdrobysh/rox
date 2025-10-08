@@ -163,7 +163,10 @@ impl<'a> Parser<'a> {
                 ))
             });
 
-        self.compilation_context = self.compilation_context.take_enclosing().unwrap();
+        self.compilation_context = self
+            .compilation_context
+            .take_enclosing()
+            .ok_or("Expected enclosing compilation context")?;
 
         Ok(operations)
     }

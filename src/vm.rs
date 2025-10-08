@@ -145,9 +145,6 @@ impl VM {
                     for op_code in upvalue_instructions {
                         if let OpCode::Upvalue(index, is_local) = op_code {
                             if is_local {
-                                // unwrap should be safe here because since we are handling an
-                                // operation we've read it from the non-empty call frame stack
-                                // let slot_start = self.call_frame_stack.last().unwrap().slot_start;
                                 closure.upvalues.push(self.capture_upvalue(index)?);
                             } else {
                                 if let Some(frame) = self.call_frame_stack.last_mut() {
@@ -315,9 +312,10 @@ impl VM {
                 }
                 OpCode::SetUpvalue(index) => {
                     let value = Rc::new(self.peek_stack(line)?);
-                    // unwrap should be safe here because since we are handling an
-                    // operation we've read it from the non-empty call frame stack
-                    let frame = self.call_frame_stack.last_mut().unwrap();
+                    let frame = match self.call_frame_stack.last_mut() {
+                        Some(frame) => frame,
+                        None => return self.runtime_error("No call frame found", line),
+                    };
 
                     if let Some(upvalue) = frame.closure.upvalues.get(*index) {
                         *upvalue.location.borrow_mut() = value.clone();
