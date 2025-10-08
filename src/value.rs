@@ -1,6 +1,10 @@
-use std::{fmt, rc::Rc};
+use std::{cell::RefCell, fmt, rc::Rc};
 
-use crate::function::{Function, NativeFunction};
+use crate::{
+    closure::Closure,
+    function::{Function, NativeFunction},
+    upvalue::Upvalue,
+};
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -10,6 +14,8 @@ pub enum Value {
     String(Rc<String>),
     Function(Rc<Function>),
     NativeFunction(Rc<NativeFunction>),
+    Closure(Rc<Closure>),
+    Upvalue(Rc<RefCell<Upvalue>>),
 }
 
 impl Value {
@@ -31,6 +37,13 @@ impl fmt::Display for Value {
             Self::String(s) => write!(f, "\"{}\"", s),
             Self::Function(func) => write!(f, "fn {}", func.name),
             Self::NativeFunction(func) => write!(f, "native fn {}", func.name),
+            Self::Closure(closure) => write!(f, "closure {}", closure.function.name),
+            Self::Upvalue(upvalue) => write!(
+                f,
+                "upvalue {:?} {:?}",
+                upvalue.borrow().location,
+                upvalue.borrow().closed
+            ),
         }
     }
 }

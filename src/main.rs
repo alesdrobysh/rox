@@ -1,12 +1,14 @@
 mod call_frame;
 mod chunk;
-mod function;
+mod closure;
 mod compilation_context;
+mod function;
 mod logger;
 mod native_functions;
 mod parser;
 mod run;
 mod scanner;
+pub mod upvalue;
 mod value;
 mod vm;
 

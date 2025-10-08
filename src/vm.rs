@@ -1,7 +1,9 @@
 use crate::call_frame::CallFrame;
 use crate::chunk::{Instruction, OpCode};
+use crate::closure::Closure;
 use crate::function::NativeFunction;
 use crate::native_functions::clock;
+use crate::upvalue::Upvalue;
 use crate::value::Value;
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -58,28 +60,9 @@ impl VM {
         }
     }
 
-    pub fn push_frame(&mut self, frame: CallFrame) {
+    pub fn interpret(&mut self, frame: CallFrame) -> InterpretResult {
         self.call_frame_stack.push(frame);
-    }
-
-    pub fn interpret(&mut self) -> InterpretResult {
         self.run()
-    }
-
-    fn next_instruction(&mut self) -> Option<&Instruction> {
-        self.call_frame_stack.last_mut()?.next_instruction()
-    }
-
-    fn offset(&mut self, offset: usize) {
-        if let Some(frame) = self.call_frame_stack.last_mut() {
-            frame.offset(offset);
-        }
-    }
-
-    fn offset_backward(&mut self, offset: usize) {
-        if let Some(frame) = self.call_frame_stack.last_mut() {
-            frame.offset_backward(offset);
-        }
     }
 
     fn run(&mut self) -> InterpretResult {
@@ -110,19 +93,18 @@ impl VM {
                     let callee = self.stack[callee_index].clone();
 
                     match callee {
-                        Value::Function(func) => {
-                            if func.arity != arg_count {
+                        Value::Closure(closure) => {
+                            let arity = closure.function.arity;
+
+                            if arity != arg_count {
                                 return self.runtime_error(
-                                    &format!(
-                                        "Expected {} arguments but got {}",
-                                        func.arity, arg_count
-                                    ),
+                                    &format!("Expected {} arguments but got {}", arity, arg_count),
                                     line,
                                 );
                             }
 
                             self.call_frame_stack.push(CallFrame {
-                                func,
+                                closure,
                                 ip: 0,
                                 slot_start: callee_index,
                             });
@@ -140,6 +122,44 @@ impl VM {
 
                         _ => return self.runtime_error("Cannot call non-function value", line),
                     }
+                }
+                OpCode::Closure(function) => {
+                    let mut closure = Closure::new(function.clone());
+
+                    let upvalue_instructions: Vec<_> = std::iter::from_fn(|| {
+                        if let Some(instruction) = self.peek_instruction() {
+                            match &instruction.op_code {
+                                OpCode::Upvalue(_, _) => {
+                                    let op_code = Some(instruction.op_code.clone());
+                                    self.next_instruction();
+                                    op_code
+                                }
+                                _ => None,
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                    for op_code in upvalue_instructions {
+                        if let OpCode::Upvalue(index, is_local) = op_code {
+                            if is_local {
+                                // unwrap should be safe here because since we are handling an
+                                // operation we've read it from the non-empty call frame stack
+                                // let slot_start = self.call_frame_stack.last().unwrap().slot_start;
+                                closure.upvalues.push(self.capture_upvalue(index)?);
+                            } else {
+                                if let Some(frame) = self.call_frame_stack.last_mut() {
+                                    closure.upvalues.push(frame.closure.upvalues[index].clone());
+                                } else {
+                                    return self.runtime_error("No call frame found", line);
+                                }
+                            }
+                        }
+                    }
+
+                    self.push_stack(Value::Closure(Rc::new(closure)));
                 }
                 OpCode::Value(value) => {
                     self.push_stack(value.clone());
@@ -204,7 +224,14 @@ impl VM {
                 OpCode::Print => {
                     let stdout = io::stdout();
                     let mut handle = stdout.lock();
-                    writeln!(handle, "{}", self.pop_stack(line)?).unwrap();
+                    let value = self.pop_stack(line)?;
+
+                    match value {
+                        Value::Closure(closure) => {
+                            writeln!(handle, "{}", closure.function).unwrap()
+                        }
+                        _ => writeln!(handle, "{}", value).unwrap(),
+                    }
                 }
                 OpCode::DefineGlobal(name) => {
                     let value = self.peek_stack(line)?;
@@ -271,6 +298,40 @@ impl VM {
                     let offset = *offset;
                     self.offset_backward(offset);
                 }
+                OpCode::GetUpvalue(index) => {
+                    let upvalue = self
+                        .call_frame_stack
+                        .last()
+                        .map(|frame| frame.closure.upvalues.get(*index))
+                        .flatten();
+
+                    if let Some(value) = upvalue {
+                        let location_rc = value.location.borrow().clone();
+                        self.push_stack((*location_rc).clone());
+                    } else {
+                        return self
+                            .runtime_error(&format!("Invalid upvalue index {}", index), line);
+                    }
+                }
+                OpCode::SetUpvalue(index) => {
+                    let value = Rc::new(self.peek_stack(line)?);
+                    // unwrap should be safe here because since we are handling an
+                    // operation we've read it from the non-empty call frame stack
+                    let frame = self.call_frame_stack.last_mut().unwrap();
+
+                    if let Some(upvalue) = frame.closure.upvalues.get(*index) {
+                        *upvalue.location.borrow_mut() = value.clone();
+                    } else {
+                        return self
+                            .runtime_error(&format!("Invalid upvalue index {}", index), line);
+                    }
+                }
+                OpCode::Upvalue(_, _) => {
+                    return self.runtime_error(
+                        "Unexpected upvalue instruction encountered outside of closure creation",
+                        line,
+                    );
+                }
             }
 
             if let Ok(level) = std::env::var("DEBUG") {
@@ -278,6 +339,26 @@ impl VM {
                     eprintln!("{}", format_stack(&self.stack));
                 }
             }
+        }
+    }
+
+    fn next_instruction(&mut self) -> Option<&Instruction> {
+        self.call_frame_stack.last_mut()?.next()
+    }
+
+    fn peek_instruction(&self) -> Option<&Instruction> {
+        self.call_frame_stack.last()?.peek()
+    }
+
+    fn offset(&mut self, offset: usize) {
+        if let Some(frame) = self.call_frame_stack.last_mut() {
+            frame.offset(offset);
+        }
+    }
+
+    fn offset_backward(&mut self, offset: usize) {
+        if let Some(frame) = self.call_frame_stack.last_mut() {
+            frame.offset_backward(offset);
         }
     }
 
@@ -326,12 +407,13 @@ impl VM {
                 format!(
                     "[line {}] in {}",
                     frame
-                        .func
+                        .closure
+                        .function
                         .chunk
                         .get_instruction(frame.ip)
                         .map(|instruction| instruction.line)
                         .unwrap_or(0),
-                    frame.func.name
+                    frame.closure.function.name
                 )
             })
             .rev()
@@ -350,5 +432,16 @@ impl VM {
         }
 
         return index;
+    }
+
+    fn capture_upvalue(&mut self, index: usize) -> Result<Rc<Upvalue>, InterpretError> {
+        let absolute_index = self.to_absolute_index(index);
+        match self.stack.get(absolute_index) {
+            Some(value) => Ok(Rc::new(Upvalue::new(value.clone()))),
+            None => {
+                self.runtime_error("Stack is empty, cannot capture upvalue", 0)?;
+                unreachable!()
+            }
+        }
     }
 }

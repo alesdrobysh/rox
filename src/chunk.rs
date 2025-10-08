@@ -1,5 +1,5 @@
-use crate::value::Value;
-use std::fmt;
+use crate::{function::Function, value::Value};
+use std::{fmt, rc::Rc};
 
 #[derive(Debug, Clone)]
 pub enum OpCode {
@@ -25,6 +25,25 @@ pub enum OpCode {
     JumpIfFalse(usize),
     Jump(usize),
     Loop(usize),
+    Closure(Rc<Function>),
+    GetUpvalue(usize),
+    SetUpvalue(usize),
+    Upvalue(usize, bool),
+}
+
+fn format_function(function: &Function) -> String {
+    format!(
+        "fn({}):\n{}",
+        function.name,
+        function
+            .chunk
+            .disassemble(&function.name)
+            .trim_end()
+            .split('\n')
+            .map(|line| format!("  {}", line))
+            .collect::<Vec<_>>()
+            .join("\n")
+    )
 }
 
 #[derive(Clone, Debug)]
@@ -44,18 +63,7 @@ impl fmt::Display for Instruction {
         let op_str = match &self.op_code {
             OpCode::Return => "RETURN".to_string(),
             OpCode::Value(value) => match value {
-                Value::Function(function) => format!(
-                    "VALUE fn({}):\n{}",
-                    function.name,
-                    function
-                        .chunk
-                        .disassemble(&function.name)
-                        .trim_end()
-                        .split('\n')
-                        .map(|line| format!("  {}", line))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                ),
+                Value::Function(function) => format!("VALUE {}", format_function(function)),
                 _ => format!("VALUE {:?}", value),
             },
             OpCode::Negate => "NEGATE".to_string(),
@@ -78,6 +86,10 @@ impl fmt::Display for Instruction {
             OpCode::Jump(offset) => format!("JUMP {}", offset),
             OpCode::Loop(offset) => format!("LOOP {}", offset),
             OpCode::Call(arg_count) => format!("CALL {}", arg_count),
+            OpCode::Closure(function) => format!("CLOSURE {}", format_function(function)),
+            OpCode::GetUpvalue(index) => format!("GET_UPVALUE {}", index),
+            OpCode::SetUpvalue(index) => format!("SET_UPVALUE {}", index),
+            OpCode::Upvalue(index, is_local) => format!("UPVALUE {} {}", index, is_local),
         };
 
         write!(f, "line {:3}: {}", self.line, op_str)

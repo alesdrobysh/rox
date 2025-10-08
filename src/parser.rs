@@ -4,8 +4,8 @@ use std::vec;
 
 use crate::{
     chunk::{Chunk, Instruction, OpCode},
-    function::{Function, FunctionType},
     compilation_context::CompilationContext,
+    function::{Function, FunctionType},
     scanner::{Scanner, Token, TokenType},
     value::Value,
 };
@@ -29,7 +29,7 @@ impl<'a> Parser<'a> {
             previous: None,
             error: None,
             panic_mode: false,
-            compilation_context: CompilationContext::new(),
+            compilation_context: CompilationContext::new(None),
             function_types: Vec::new(),
         }
     }
@@ -95,8 +95,8 @@ impl<'a> Parser<'a> {
         name: String,
         function_type: FunctionType,
     ) -> Result<Vec<Instruction>, String> {
-        let saved_registry = mem::take(&mut self.compilation_context);
-        self.compilation_context = CompilationContext::new();
+        self.compilation_context =
+            CompilationContext::new(Some(Box::new(mem::take(&mut self.compilation_context))));
         self.compilation_context.add_local("".to_string())?;
 
         self.consume(TokenType::LeftParen, "Expect '(' after function name")?;
@@ -144,8 +144,6 @@ impl<'a> Parser<'a> {
             ]);
         }
 
-        self.compilation_context = saved_registry;
-
         let function = Function {
             name: name.to_string(),
             arity,
@@ -153,14 +151,25 @@ impl<'a> Parser<'a> {
             chunk,
         };
 
-        Ok(vec![Instruction::new(
-            OpCode::Value(Value::Function(Rc::new(function))),
-            line,
-        )])
+        let mut operations = vec![Instruction::new(OpCode::Closure(Rc::new(function)), line)];
+
+        self.compilation_context
+            .upvalues
+            .iter()
+            .for_each(|upvalue| {
+                operations.push(Instruction::new(
+                    OpCode::Upvalue(upvalue.index, upvalue.is_local),
+                    line,
+                ))
+            });
+
+        self.compilation_context = self.compilation_context.take_enclosing().unwrap();
+
+        Ok(operations)
     }
 
     fn var_declaration(&mut self) -> Result<Vec<Instruction>, String> {
-        let depth = self.compilation_context.depth;
+        let depth = self.compilation_context.get_depth();
         let name = self.parse_variable("Expect variable name")?;
         let line = self.previous.ok_or("Unexpected end of input")?.line;
 
@@ -195,7 +204,7 @@ impl<'a> Parser<'a> {
         let identifier = self.consume(TokenType::Identifier, error_message)?;
         let name = identifier.lexeme.to_string();
 
-        if self.compilation_context.depth > 0 {
+        if self.compilation_context.get_depth() > 0 {
             self.declare_variable(name.clone())?;
         }
 
@@ -205,7 +214,7 @@ impl<'a> Parser<'a> {
     /// Defines a variable: if in a local scope, marks it initialized; if global, emits a DefineGlobal instruction.
     /// Returns any instructions to emit (for global scope), or an empty Vec for local scope.
     fn define_variable(&mut self, name: String, line: usize) -> Result<Vec<Instruction>, String> {
-        if self.compilation_context.depth > 0 {
+        if self.compilation_context.get_depth() > 0 {
             self.compilation_context.mark_initialized()?;
             Ok(vec![])
         } else {
@@ -233,7 +242,7 @@ impl<'a> Parser<'a> {
         for variable in self.compilation_context.iter() {
             match variable.depth {
                 Some(depth)
-                    if depth == self.compilation_context.depth && variable.name == name =>
+                    if depth == self.compilation_context.get_depth() && variable.name == name =>
                 {
                     return Err(format!(
                         "Variable '{}' already declared in this scope",
@@ -463,7 +472,7 @@ impl<'a> Parser<'a> {
                 .ok_or("Unexpected end of input")?;
 
             match variable.depth {
-                Some(depth) if depth <= self.compilation_context.depth => break,
+                Some(depth) if depth <= self.compilation_context.get_depth() => break,
                 _ => {}
             }
 
@@ -853,6 +862,9 @@ impl<'a> Parser<'a> {
         if let Some(local) = self.compilation_context.resolve_local(name)? {
             set_operation = OpCode::SetLocal(local.clone());
             get_operation = OpCode::GetLocal(local.clone());
+        } else if let Some(upvalue) = self.compilation_context.resolve_upvalue(name)? {
+            set_operation = OpCode::SetUpvalue(upvalue);
+            get_operation = OpCode::GetUpvalue(upvalue);
         }
 
         if can_assign && self.match_token(TokenType::Equal)? {

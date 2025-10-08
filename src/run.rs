@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use crate::call_frame::CallFrame;
 use crate::chunk::{Instruction, OpCode};
+use crate::closure::Closure;
 use crate::function::{Function, FunctionType};
 use crate::logger;
 use crate::parser::Parser;
@@ -23,11 +24,10 @@ pub fn run(source: String, vm: &mut VM) -> InterpretResult {
     logger::info(&function.chunk.disassemble("<script>"));
 
     let frame = CallFrame {
-        func: Rc::new(function),
+        closure: Rc::new(Closure::new(Rc::new(function))),
         ip: 0,
         slot_start: 0,
     };
 
-    vm.push_frame(frame);
-    vm.interpret()
+    vm.interpret(frame)
 }

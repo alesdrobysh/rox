@@ -1,11 +1,13 @@
 pub mod call_frame;
 pub mod chunk;
-pub mod function;
+pub mod closure;
 pub mod compilation_context;
+pub mod function;
 pub mod logger;
 pub mod native_functions;
 pub mod parser;
 pub mod run;
 pub mod scanner;
+pub mod upvalue;
 pub mod value;
 pub mod vm;
