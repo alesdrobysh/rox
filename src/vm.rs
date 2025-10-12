@@ -5,6 +5,7 @@ use crate::function::NativeFunction;
 use crate::native_functions::clock;
 use crate::upvalue::Upvalue;
 use crate::value::Value;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::rc::Rc;
@@ -43,6 +44,7 @@ pub struct VM {
     stack: Vec<Value>,
     globals: HashMap<String, Value>,
     call_frame_stack: CallFrameStack,
+    open_upvalues: Vec<Rc<Upvalue>>,
 }
 
 impl VM {
@@ -57,6 +59,7 @@ impl VM {
             stack: Vec::new(),
             globals,
             call_frame_stack: CallFrameStack::new(),
+            open_upvalues: Vec::new(),
         }
     }
 
@@ -81,6 +84,7 @@ impl VM {
                         }
 
                         let result = self.pop_stack(line)?;
+                        self.close_upvalues(frame.slot_start)?;
                         self.stack.truncate(frame.slot_start);
                         self.push_stack(result);
                     }
@@ -231,7 +235,7 @@ impl VM {
                     }
                 }
                 OpCode::DefineGlobal(name) => {
-                    let value = self.peek_stack(line)?;
+                    let value = self.pop_stack(line)?;
                     self.globals.insert(name.clone(), value);
                 }
                 OpCode::GetGlobal(name) => {
@@ -302,23 +306,23 @@ impl VM {
                         .map(|frame| frame.closure.upvalues.get(*index))
                         .flatten();
 
-                    if let Some(value) = upvalue {
-                        let location_rc = value.location.borrow().clone();
-                        self.push_stack((*location_rc).clone());
+                    if let Some(upvalue) = upvalue {
+                        let value = upvalue.get_value();
+                        self.push_stack(value);
                     } else {
                         return self
                             .runtime_error(&format!("Invalid upvalue index {}", index), line);
                     }
                 }
                 OpCode::SetUpvalue(index) => {
-                    let value = Rc::new(self.peek_stack(line)?);
+                    let value = self.peek_stack(line)?;
                     let frame = match self.call_frame_stack.last_mut() {
                         Some(frame) => frame,
                         None => return self.runtime_error("No call frame found", line),
                     };
 
                     if let Some(upvalue) = frame.closure.upvalues.get(*index) {
-                        *upvalue.location.borrow_mut() = value.clone();
+                        upvalue.set_value(value);
                     } else {
                         return self
                             .runtime_error(&format!("Invalid upvalue index {}", index), line);
@@ -330,11 +334,22 @@ impl VM {
                         line,
                     );
                 }
+                OpCode::CloseUpvalue => {
+                    let stack_top = self.stack.len();
+                    if stack_top > 0 {
+                        self.close_upvalues(stack_top - 1)?;
+                    }
+                    self.pop_stack(line)?;
+                }
             }
 
             if let Ok(level) = std::env::var("DEBUG") {
                 if level == "debug" {
-                    eprintln!("{}", format_stack(&self.stack));
+                    eprintln!(
+                        "{:?}\n{}\n",
+                        &instruction.op_code,
+                        format_stack(&self.stack)
+                    );
                 }
             }
         }
@@ -434,12 +449,51 @@ impl VM {
 
     fn capture_upvalue(&mut self, index: usize) -> Result<Rc<Upvalue>, InterpretError> {
         let absolute_index = self.to_absolute_index(index);
-        match self.stack.get(absolute_index) {
-            Some(value) => Ok(Rc::new(Upvalue::new(value.clone()))),
+
+        let stack_value = match self.stack.get(absolute_index) {
+            Some(value) => value.clone(),
             None => {
-                self.runtime_error("Stack is empty, cannot capture upvalue", 0)?;
+                self.runtime_error("Invalid stack index for upvalue capture", 0)?;
                 unreachable!()
             }
+        };
+
+        for upvalue in &self.open_upvalues {
+            if let Some(stack_index) = *upvalue.stack_index.borrow() {
+                if stack_index == absolute_index {
+                    return Ok(upvalue.clone());
+                }
+            }
         }
+
+        let location = Rc::new(RefCell::new(stack_value));
+        let new_upvalue = Rc::new(Upvalue::new(location, absolute_index));
+
+        self.open_upvalues.push(new_upvalue.clone());
+        Ok(new_upvalue)
+    }
+
+    fn close_upvalues(&mut self, last_stack_index: usize) -> InterpretResult {
+        let mut to_close = Vec::new();
+
+        self.open_upvalues.retain(|upvalue| {
+            if let Some(stack_index) = *upvalue.stack_index.borrow() {
+                if stack_index >= last_stack_index {
+                    to_close.push(upvalue.clone());
+                    false
+                } else {
+                    true
+                }
+            } else {
+                false
+            }
+        });
+
+        for upvalue in to_close {
+            let current_value = upvalue.location.borrow().clone();
+            upvalue.close(current_value);
+        }
+
+        Ok(())
     }
 }

@@ -4,6 +4,7 @@ use crate::logger;
 pub struct Variable {
     pub name: String,
     pub depth: Option<usize>,
+    pub is_captured: bool,
 }
 
 impl Clone for Variable {
@@ -11,6 +12,7 @@ impl Clone for Variable {
         Variable {
             name: self.name.clone(),
             depth: self.depth,
+            is_captured: self.is_captured,
         }
     }
 }
@@ -48,7 +50,11 @@ impl CompilationContext {
     }
 
     pub fn add_local(&mut self, name: String) -> Result<(), String> {
-        self.variables.push(Variable { name, depth: None });
+        self.variables.push(Variable {
+            name,
+            depth: None,
+            is_captured: false,
+        });
         Ok(())
     }
 
@@ -85,23 +91,43 @@ impl CompilationContext {
     }
 
     pub fn resolve_upvalue(&mut self, name: &str) -> Result<Option<usize>, String> {
-        match &mut self.enclosing {
-            Some(enclosing) => {
-                let result = enclosing.resolve_local(name)?;
-                if let Some(local) = result {
-                    self.add_upvalue(local, true)?;
-                    return Ok(Some(self.upvalues.len() - 1));
-                }
+        if self.enclosing.is_none() {
+            return Ok(None);
+        }
 
-                let upvalue = enclosing.resolve_upvalue(name)?;
-                if let Some(upvalue) = upvalue {
-                    self.add_upvalue(upvalue, false)?;
-                    return Ok(Some(self.upvalues.len() - 1));
-                }
+        let (local_result, upvalue_result) = {
+            let enclosing = match self.enclosing.as_mut() {
+                Some(enclosing) => enclosing,
+                None => return Ok(None),
+            };
+            let local = enclosing.resolve_local(name)?;
+            let upvalue = if local.is_none() {
+                enclosing.resolve_upvalue(name)?
+            } else {
+                None
+            };
+            (local, upvalue)
+        };
 
-                return Ok(None);
+        if let Some(local) = local_result {
+            self.add_upvalue(local, true)?;
+            if let Some(enclosing) = self.enclosing.as_mut() {
+                enclosing.capture(local);
             }
-            _ => Ok(None),
+            return Ok(Some(self.upvalues.len() - 1));
+        }
+
+        if let Some(upvalue) = upvalue_result {
+            self.add_upvalue(upvalue, false)?;
+            return Ok(Some(self.upvalues.len() - 1));
+        }
+
+        Ok(None)
+    }
+
+    pub fn capture(&mut self, index: usize) {
+        if let Some(variable) = self.variables.get_mut(index) {
+            variable.is_captured = true;
         }
     }
 
@@ -117,8 +143,8 @@ impl CompilationContext {
         self.variables.is_empty()
     }
 
-    pub fn pop(&mut self) {
-        self.variables.pop();
+    pub fn pop(&mut self) -> Option<Variable> {
+        self.variables.pop()
     }
 
     pub fn get_depth(&self) -> usize {

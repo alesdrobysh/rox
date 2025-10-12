@@ -172,7 +172,6 @@ impl<'a> Parser<'a> {
     }
 
     fn var_declaration(&mut self) -> Result<Vec<Instruction>, String> {
-        let depth = self.compilation_context.get_depth();
         let name = self.parse_variable("Expect variable name")?;
         let line = self.previous.ok_or("Unexpected end of input")?.line;
 
@@ -191,14 +190,6 @@ impl<'a> Parser<'a> {
         )?;
 
         operations.extend(self.define_variable(name, line)?);
-        if depth > 0 {
-            return Ok(operations);
-        }
-
-        if match_equal {
-            operations.push(Instruction::new(OpCode::Pop, line));
-        }
-
         Ok(operations)
     }
 
@@ -479,8 +470,16 @@ impl<'a> Parser<'a> {
                 _ => {}
             }
 
-            self.compilation_context.pop();
-            instructions.push(Instruction::new(OpCode::Pop, line));
+            match self.compilation_context.pop() {
+                Some(variable) => {
+                    if variable.is_captured {
+                        instructions.push(Instruction::new(OpCode::CloseUpvalue, line));
+                    } else {
+                        instructions.push(Instruction::new(OpCode::Pop, line));
+                    }
+                }
+                None => {}
+            }
         }
 
         Ok(instructions)
