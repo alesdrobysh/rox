@@ -1,5 +1,6 @@
 use crate::call_frame::CallFrame;
 use crate::chunk::{Instruction, OpCode};
+use crate::class::{Class, Instance};
 use crate::closure::Closure;
 use crate::function::NativeFunction;
 use crate::native_functions::clock;
@@ -122,6 +123,11 @@ impl VM {
 
                             let result = (native.function)(args);
                             self.push_stack(result);
+                        }
+
+                        Value::Class(class) => {
+                            let instance = Instance::new(class.clone());
+                            self.push_stack(Value::Instance(Rc::new(RefCell::new(instance))));
                         }
 
                         _ => return self.runtime_error("Cannot call non-function value", line),
@@ -341,6 +347,63 @@ impl VM {
                     }
                     self.pop_stack(line)?;
                 }
+                OpCode::Class(name) => {
+                    let class = Class::new(name.clone());
+                    self.push_stack(Value::Class(Rc::new(class)));
+                }
+                OpCode::GetProperty(name) => {
+                    let instance = self.peek_stack(line)?;
+                    match instance {
+                        Value::Instance(instance) => {
+                            if let Some(property) = instance.borrow().fields.get(name) {
+                                self.pop_stack(line)?;
+                                self.push_stack(property.clone());
+                            } else {
+                                return self.runtime_error(
+                                    &format!("Undefined property '{}'", name),
+                                    line,
+                                );
+                            }
+                        }
+                        _ => {
+                            return self.runtime_error(
+                                &format!(
+                                    "Only instances have properties. Expected instance, got {}",
+                                    instance.type_name()
+                                ),
+                                line,
+                            );
+                        }
+                    }
+                }
+                OpCode::SetProperty(name) => {
+                    // Stack layout: [..., instance, value]
+                    // We need to get both instance (depth 1) and value (depth 0)
+                    let value = self.peek_stack_at(0, line)?;
+                    let instance = self.peek_stack_at(1, line)?;
+
+                    match instance {
+                        Value::Instance(instance) => {
+                            instance
+                                .borrow_mut()
+                                .fields
+                                .insert(name.clone(), value.clone());
+                            // Pop both instance and value, then push value back (assignment returns the value)
+                            self.pop_stack(line)?;
+                            self.pop_stack(line)?;
+                            self.push_stack(value);
+                        }
+                        _ => {
+                            return self.runtime_error(
+                                &format!(
+                                    "Only instances have properties. Expected instance, got {}",
+                                    instance.type_name()
+                                ),
+                                line,
+                            );
+                        }
+                    }
+                }
             }
 
             if let Ok(level) = std::env::var("DEBUG") {
@@ -399,13 +462,21 @@ impl VM {
     }
 
     fn peek_stack(&mut self, line: usize) -> Result<Value, InterpretError> {
-        match self.stack.last() {
-            Some(value) => Ok(value.clone()),
-            None => {
-                self.runtime_error("Stack is empty, cannot peek", line)?;
-                unreachable!()
-            }
+        self.peek_stack_at(0, line)
+    }
+
+    fn peek_stack_at(&self, depth: usize, line: usize) -> Result<Value, InterpretError> {
+        let stack_len = self.stack.len();
+        if depth >= stack_len {
+            return Err(InterpretError::RuntimeError(
+                format!(
+                    "Cannot peek at depth {} with stack size {}",
+                    depth, stack_len
+                ),
+                line,
+            ));
         }
+        Ok(self.stack[stack_len - 1 - depth].clone())
     }
 
     fn push_stack(&mut self, value: Value) {

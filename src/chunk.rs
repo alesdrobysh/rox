@@ -30,6 +30,9 @@ pub enum OpCode {
     SetUpvalue(usize),
     Upvalue(usize, bool),
     CloseUpvalue,
+    Class(String),
+    SetProperty(String),
+    GetProperty(String),
 }
 
 fn format_function(function: &Function) -> String {
@@ -92,6 +95,9 @@ impl fmt::Display for Instruction {
             OpCode::SetUpvalue(index) => format!("SET_UPVALUE {}", index),
             OpCode::Upvalue(index, is_local) => format!("UPVALUE {} {}", index, is_local),
             OpCode::CloseUpvalue => "CLOSE_UPVALUE".to_string(),
+            OpCode::Class(name) => format!("CLASS {}", name),
+            OpCode::SetProperty(name) => format!("SET_PROPERTY {}", name),
+            OpCode::GetProperty(name) => format!("GET_PROPERTY {}", name),
         };
 
         write!(f, "line {:3}: {}", self.line, op_str)

@@ -59,7 +59,9 @@ impl<'a> Parser<'a> {
     fn declaration(&mut self) -> Result<Vec<Instruction>, String> {
         let result;
 
-        if self.match_token(TokenType::Fun)? {
+        if self.match_token(TokenType::Class)? {
+            result = self.class_declaration();
+        } else if self.match_token(TokenType::Fun)? {
             result = self.fun_declaration();
         } else if self.match_token(TokenType::Var)? {
             result = self.var_declaration();
@@ -72,6 +74,20 @@ impl<'a> Parser<'a> {
         }
 
         result
+    }
+
+    fn class_declaration(&mut self) -> Result<Vec<Instruction>, String> {
+        let name = self.parse_variable("Expect class name")?;
+        let line = self.previous.ok_or("Unexpected end of input")?.line;
+
+        let mut result = vec![Instruction::new(OpCode::Class(name.clone()), line)];
+        let variable = self.define_variable(name, line)?;
+        result.extend(variable);
+
+        self.consume(TokenType::LeftBrace, "Expect '{' before class body.")?;
+        self.consume(TokenType::RightBrace, "Expect '}' after class body.")?;
+
+        Ok(result)
     }
 
     fn fun_declaration(&mut self) -> Result<Vec<Instruction>, String> {
@@ -535,6 +551,9 @@ impl<'a> Parser<'a> {
                     InfixParseFn::ParseFn(f) => {
                         operations.extend(f(self)?);
                     }
+                    InfixParseFn::ParseFnCanAssign(f) => {
+                        operations.extend(f(self, can_assign)?);
+                    }
                 }
             }
         }
@@ -608,6 +627,7 @@ impl<'a> Parser<'a> {
         let and = Box::new(|parser: &mut Parser| parser.and());
         let or = Box::new(|parser: &mut Parser| parser.or());
         let call = Box::new(|parser: &mut Parser| parser.call());
+        let dot = Box::new(|parser: &mut Parser, can_assign: bool| parser.dot(can_assign));
 
         match operator {
             TokenType::LeftParen => ParseRule {
@@ -672,6 +692,11 @@ impl<'a> Parser<'a> {
                 prefix: None,
                 infix: Some(InfixParseFn::ParseFn(or)),
                 precedence: Precedence::Or,
+            },
+            TokenType::Dot => ParseRule {
+                prefix: None,
+                infix: Some(InfixParseFn::ParseFnCanAssign(dot)),
+                precedence: Precedence::Call,
             },
             _ => ParseRule {
                 prefix: None,
@@ -850,6 +875,21 @@ impl<'a> Parser<'a> {
         instructions.push(Instruction::new(OpCode::Call(count), line));
 
         Ok(instructions)
+    }
+
+    fn dot(&mut self, can_assign: bool) -> Result<Vec<Instruction>, String> {
+        let identifier = self.consume(TokenType::Identifier, "Expected identifier after '.'.")?;
+        let lexeme = identifier.lexeme.to_string();
+
+        let line = self.previous.ok_or("Unexpected end of input")?.line;
+
+        if can_assign && self.match_token(TokenType::Equal)? {
+            let mut instructions = self.expression()?;
+            instructions.push(Instruction::new(OpCode::SetProperty(lexeme), line));
+            Ok(instructions)
+        } else {
+            Ok(vec![Instruction::new(OpCode::GetProperty(lexeme), line)])
+        }
     }
 
     fn named_variable(
@@ -1052,6 +1092,7 @@ enum PrefixParseFn {
 
 enum InfixParseFn {
     ParseFn(ParseFn),
+    ParseFnCanAssign(ParseFnCanAssign),
 }
 
 struct ParseRule {

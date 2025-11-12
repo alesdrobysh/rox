@@ -1,6 +1,7 @@
 use std::{cell::RefCell, fmt, rc::Rc};
 
 use crate::{
+    class::{Class, Instance},
     closure::Closure,
     function::{Function, NativeFunction},
     upvalue::Upvalue,
@@ -16,6 +17,8 @@ pub enum Value {
     NativeFunction(Rc<NativeFunction>),
     Closure(Rc<Closure>),
     Upvalue(Rc<RefCell<Upvalue>>),
+    Class(Rc<Class>),
+    Instance(Rc<RefCell<Instance>>),
 }
 
 impl Value {
@@ -24,6 +27,21 @@ impl Value {
             Value::Bool(b) => !b,
             Value::Nil => true,
             _ => false,
+        }
+    }
+
+    pub fn type_name(&self) -> &str {
+        match self {
+            Value::Bool(_) => "bool",
+            Value::Number(_) => "number",
+            Value::Nil => "nil",
+            Value::String(_) => "string",
+            Value::Function(_) => "function",
+            Value::NativeFunction(_) => "native function",
+            Value::Closure(_) => "closure",
+            Value::Upvalue(_) => "upvalue",
+            Value::Class(_) => "class",
+            Value::Instance(_) => "instance",
         }
     }
 }
@@ -44,6 +62,8 @@ impl fmt::Display for Value {
                 upvalue.borrow().location,
                 upvalue.borrow().closed
             ),
+            Self::Class(class) => write!(f, "class {}", class.name),
+            Self::Instance(instance) => write!(f, "instance {}", instance.borrow().class.name),
         }
     }
 }

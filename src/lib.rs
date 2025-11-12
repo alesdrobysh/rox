@@ -1,5 +1,6 @@
 pub mod call_frame;
 pub mod chunk;
+pub mod class;
 pub mod closure;
 pub mod compilation_context;
 pub mod function;
