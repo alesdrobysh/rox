@@ -18,6 +18,7 @@ pub struct Parser<'a> {
     panic_mode: bool,
     compilation_context: CompilationContext,
     function_types: Vec<FunctionType>,
+    in_class: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -31,6 +32,7 @@ impl<'a> Parser<'a> {
             panic_mode: false,
             compilation_context: CompilationContext::new(None),
             function_types: Vec::new(),
+            in_class: false,
         }
     }
 
@@ -77,6 +79,8 @@ impl<'a> Parser<'a> {
     }
 
     fn class_declaration(&mut self) -> Result<Vec<Instruction>, String> {
+        self.in_class = true;
+
         let name = self.parse_variable("Expect class name")?;
         let line = self.previous.ok_or("Unexpected end of input")?.line;
 
@@ -94,6 +98,8 @@ impl<'a> Parser<'a> {
         self.consume(TokenType::RightBrace, "Expect '}' after class body.")?;
 
         result.push(Instruction::new(OpCode::Pop, line));
+
+        self.in_class = false;
 
         Ok(result)
     }
@@ -929,6 +935,13 @@ impl<'a> Parser<'a> {
     }
 
     fn this(&mut self) -> Result<Vec<Instruction>, String> {
+        if !self.in_class {
+            return self.error_at(
+                &self.previous.unwrap(),
+                "Can't use 'this' outside of a class.",
+            );
+        }
+
         self.variable(false)
     }
 
@@ -1026,15 +1039,15 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn error_at(&mut self, token: &Token<'a>, message: &str) -> Result<(), String> {
+    fn error_at(&mut self, token: &Token<'a>, message: &str) -> Result<Vec<Instruction>, String> {
         if self.panic_mode {
-            return Ok(());
+            return Ok(vec![]);
         }
 
         self.panic_mode = true;
 
         if token.token_type == TokenType::Error {
-            return Ok(());
+            return Ok(vec![]);
         }
 
         let error_string = format!(
