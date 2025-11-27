@@ -33,6 +33,7 @@ pub enum OpCode {
     Class(String),
     SetProperty(String),
     GetProperty(String),
+    Method(String),
 }
 
 fn format_function(function: &Function) -> String {
@@ -66,10 +67,7 @@ impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let op_str = match &self.op_code {
             OpCode::Return => "RETURN".to_string(),
-            OpCode::Value(value) => match value {
-                Value::Function(function) => format!("VALUE {}", format_function(function)),
-                _ => format!("VALUE {:?}", value),
-            },
+            OpCode::Value(value) => format!("VALUE {:?}", value),
             OpCode::Negate => "NEGATE".to_string(),
             OpCode::Add => "ADD".to_string(),
             OpCode::Subtract => "SUBTRACT".to_string(),
@@ -98,6 +96,7 @@ impl fmt::Display for Instruction {
             OpCode::Class(name) => format!("CLASS {}", name),
             OpCode::SetProperty(name) => format!("SET_PROPERTY {}", name),
             OpCode::GetProperty(name) => format!("GET_PROPERTY {}", name),
+            OpCode::Method(name) => format!("METHOD {}", name),
         };
 
         write!(f, "line {:3}: {}", self.line, op_str)

@@ -81,11 +81,19 @@ impl<'a> Parser<'a> {
         let line = self.previous.ok_or("Unexpected end of input")?.line;
 
         let mut result = vec![Instruction::new(OpCode::Class(name.clone()), line)];
-        let variable = self.define_variable(name, line)?;
+        let variable = self.define_variable(name.clone(), line)?;
         result.extend(variable);
+        result.extend(self.named_variable(&name, line, false)?);
 
         self.consume(TokenType::LeftBrace, "Expect '{' before class body.")?;
+
+        while !self.check(TokenType::RightBrace) && !self.check(TokenType::Eof) {
+            result.extend(self.method()?);
+        }
+
         self.consume(TokenType::RightBrace, "Expect '}' after class body.")?;
+
+        result.push(Instruction::new(OpCode::Pop, line));
 
         Ok(result)
     }
@@ -183,6 +191,21 @@ impl<'a> Parser<'a> {
             .compilation_context
             .take_enclosing()
             .ok_or("Expected enclosing compilation context")?;
+
+        Ok(operations)
+    }
+
+    fn method(&mut self) -> Result<Vec<Instruction>, String> {
+        let name = self.parse_variable("Expect method name")?;
+        let line = self.previous.ok_or("Unexpected end of input")?.line;
+
+        self.function_types.push(FunctionType::Function);
+
+        let mut operations = self.function(name.clone(), FunctionType::Function)?;
+
+        self.function_types.pop();
+
+        operations.push(Instruction::new(OpCode::Method(name), line));
 
         Ok(operations)
     }

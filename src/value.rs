@@ -1,9 +1,9 @@
 use std::{cell::RefCell, fmt, rc::Rc};
 
 use crate::{
-    class::{Class, Instance},
+    class::{BoundMethod, Class, Instance},
     closure::Closure,
-    function::{Function, NativeFunction},
+    function::NativeFunction,
     upvalue::Upvalue,
 };
 
@@ -13,12 +13,12 @@ pub enum Value {
     Number(f64),
     Nil,
     String(Rc<String>),
-    Function(Rc<Function>),
     NativeFunction(Rc<NativeFunction>),
     Closure(Rc<Closure>),
     Upvalue(Rc<RefCell<Upvalue>>),
-    Class(Rc<Class>),
+    Class(Rc<RefCell<Class>>),
     Instance(Rc<RefCell<Instance>>),
+    BoundMethod(Rc<RefCell<BoundMethod>>),
 }
 
 impl Value {
@@ -36,13 +36,25 @@ impl Value {
             Value::Number(_) => "number",
             Value::Nil => "nil",
             Value::String(_) => "string",
-            Value::Function(_) => "function",
             Value::NativeFunction(_) => "native function",
             Value::Closure(_) => "closure",
             Value::Upvalue(_) => "upvalue",
             Value::Class(_) => "class",
             Value::Instance(_) => "instance",
+            Value::BoundMethod(_) => "bound method",
         }
+    }
+
+    pub fn class(class: Class) -> Self {
+        Value::Class(Rc::new(RefCell::new(class)))
+    }
+
+    pub fn instance(instance: Instance) -> Self {
+        Value::Instance(Rc::new(RefCell::new(instance)))
+    }
+
+    pub fn bound_method(bound_method: BoundMethod) -> Self {
+        Value::BoundMethod(Rc::new(RefCell::new(bound_method)))
     }
 }
 
@@ -53,7 +65,6 @@ impl fmt::Display for Value {
             Self::Number(n) => write!(f, "{}", n),
             Self::Nil => write!(f, "nil"),
             Self::String(s) => write!(f, "\"{}\"", s),
-            Self::Function(func) => write!(f, "fn {}", func.name),
             Self::NativeFunction(func) => write!(f, "native fn {}", func.name),
             Self::Closure(closure) => write!(f, "closure {}", closure.function.name),
             Self::Upvalue(upvalue) => write!(
@@ -62,8 +73,17 @@ impl fmt::Display for Value {
                 upvalue.borrow().location,
                 upvalue.borrow().closed
             ),
-            Self::Class(class) => write!(f, "class {}", class.name),
-            Self::Instance(instance) => write!(f, "instance {}", instance.borrow().class.name),
+            Self::Class(class) => write!(f, "class {}", class.borrow().name),
+            Self::Instance(instance) => {
+                write!(f, "instance {}", instance.borrow().class.borrow().name)
+            }
+            Self::BoundMethod(bound_method) => {
+                write!(
+                    f,
+                    "bound method {}",
+                    bound_method.borrow().method.function.name
+                )
+            }
         }
     }
 }

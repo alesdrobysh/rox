@@ -1,6 +1,6 @@
 use crate::call_frame::CallFrame;
 use crate::chunk::{Instruction, OpCode};
-use crate::class::{Class, Instance};
+use crate::class::{BoundMethod, Class, Instance};
 use crate::closure::Closure;
 use crate::function::NativeFunction;
 use crate::native_functions::clock;
@@ -99,20 +99,7 @@ impl VM {
 
                     match callee {
                         Value::Closure(closure) => {
-                            let arity = closure.function.arity;
-
-                            if arity != arg_count {
-                                return self.runtime_error(
-                                    &format!("Expected {} arguments but got {}", arity, arg_count),
-                                    line,
-                                );
-                            }
-
-                            self.call_frame_stack.push(CallFrame {
-                                closure,
-                                ip: 0,
-                                slot_start: callee_index,
-                            });
+                            self.call_closure(closure, arg_count, line, callee_index)?;
                         }
 
                         Value::NativeFunction(native) => {
@@ -126,8 +113,14 @@ impl VM {
                         }
 
                         Value::Class(class) => {
-                            let instance = Instance::new(class.clone());
-                            self.push_stack(Value::Instance(Rc::new(RefCell::new(instance))));
+                            let instance = Instance::new(class);
+                            self.push_stack(Value::instance(instance));
+                        }
+
+                        Value::BoundMethod(bound_method) => {
+                            let closure = Rc::clone(&bound_method.borrow().method);
+
+                            self.call_closure(closure, arg_count, line, callee_index)?;
                         }
 
                         _ => return self.runtime_error("Cannot call non-function value", line),
@@ -349,7 +342,7 @@ impl VM {
                 }
                 OpCode::Class(name) => {
                     let class = Class::new(name.clone());
-                    self.push_stack(Value::Class(Rc::new(class)));
+                    self.push_stack(Value::class(class));
                 }
                 OpCode::GetProperty(name) => {
                     let instance = self.peek_stack(line)?;
@@ -358,6 +351,13 @@ impl VM {
                             if let Some(property) = instance.borrow().fields.get(name) {
                                 self.pop_stack(line)?;
                                 self.push_stack(property.clone());
+                            } else if let Some(method) =
+                                instance.borrow().class.borrow().methods.get(name)
+                            {
+                                let bound_method =
+                                    BoundMethod::new(method.clone(), instance.clone());
+                                self.pop_stack(line)?;
+                                self.push_stack(Value::bound_method(bound_method));
                             } else {
                                 return self.runtime_error(
                                     &format!("Undefined property '{}'", name),
@@ -404,18 +404,69 @@ impl VM {
                         }
                     }
                 }
+                OpCode::Method(name) => {
+                    let method = self.peek_stack_at(0, line)?;
+                    let class_val = self.peek_stack_at(1, line)?;
+
+                    match (&class_val, &method) {
+                        (Value::Class(class_rc), Value::Closure(closure_rc)) => {
+                            class_rc
+                                .borrow_mut()
+                                .methods
+                                .insert(name.clone(), closure_rc.clone());
+
+                            self.pop_stack(line)?;
+                        }
+                        _ => {
+                            return self.runtime_error(
+                                &format!(
+                                    "METHOD
+                                      requires class and closure, got {} and {}",
+                                    class_val.type_name(),
+                                    method.type_name()
+                                ),
+                                line,
+                            );
+                        }
+                    }
+                }
             }
 
             if let Ok(level) = std::env::var("DEBUG") {
                 if level == "debug" {
                     eprintln!(
-                        "{:?}\n{}\n",
+                        "Handled instruction: {:?}\nStack: {}\n",
                         &instruction.op_code,
                         format_stack(&self.stack)
                     );
                 }
             }
         }
+    }
+
+    fn call_closure(
+        &mut self,
+        closure: Rc<Closure>,
+        arg_count: usize,
+        line: usize,
+        callee_index: usize,
+    ) -> Result<(), InterpretError> {
+        let arity = closure.function.arity;
+
+        if arity != arg_count {
+            return self.runtime_error(
+                &format!("Expected {} arguments but got {}", arity, arg_count),
+                line,
+            );
+        }
+
+        self.call_frame_stack.push(CallFrame {
+            closure,
+            ip: 0,
+            slot_start: callee_index,
+        });
+
+        Ok(())
     }
 
     fn next_instruction(&mut self) -> Option<&Instruction> {
