@@ -121,7 +121,14 @@ impl<'a> Parser<'a> {
     ) -> Result<Vec<Instruction>, String> {
         self.compilation_context =
             CompilationContext::new(Some(Box::new(mem::take(&mut self.compilation_context))));
-        self.compilation_context.add_local("".to_string())?;
+
+        let zero_slot_name = match function_type {
+            FunctionType::Method => "this",
+            _ => "",
+        };
+
+        self.compilation_context
+            .add_local(zero_slot_name.to_string())?;
 
         self.consume(TokenType::LeftParen, "Expect '(' after function name")?;
         let mut arity = 0;
@@ -199,9 +206,9 @@ impl<'a> Parser<'a> {
         let name = self.parse_variable("Expect method name")?;
         let line = self.previous.ok_or("Unexpected end of input")?.line;
 
-        self.function_types.push(FunctionType::Function);
+        self.function_types.push(FunctionType::Method);
 
-        let mut operations = self.function(name.clone(), FunctionType::Function)?;
+        let mut operations = self.function(name.clone(), FunctionType::Method)?;
 
         self.function_types.pop();
 
@@ -651,6 +658,7 @@ impl<'a> Parser<'a> {
         let or = Box::new(|parser: &mut Parser| parser.or());
         let call = Box::new(|parser: &mut Parser| parser.call());
         let dot = Box::new(|parser: &mut Parser, can_assign: bool| parser.dot(can_assign));
+        let this = Box::new(|parser: &mut Parser| parser.this());
 
         match operator {
             TokenType::LeftParen => ParseRule {
@@ -720,6 +728,11 @@ impl<'a> Parser<'a> {
                 prefix: None,
                 infix: Some(InfixParseFn::ParseFnCanAssign(dot)),
                 precedence: Precedence::Call,
+            },
+            TokenType::This => ParseRule {
+                prefix: Some(PrefixParseFn::ParseFn(this)),
+                infix: None,
+                precedence: Precedence::None,
             },
             _ => ParseRule {
                 prefix: None,
@@ -913,6 +926,10 @@ impl<'a> Parser<'a> {
         } else {
             Ok(vec![Instruction::new(OpCode::GetProperty(lexeme), line)])
         }
+    }
+
+    fn this(&mut self) -> Result<Vec<Instruction>, String> {
+        self.variable(false)
     }
 
     fn named_variable(

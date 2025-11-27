@@ -50,9 +50,11 @@ impl CompilationContext {
     }
 
     pub fn add_local(&mut self, name: String) -> Result<(), String> {
+        let depth = if name == "this" { Some(0) } else { None };
+
         self.variables.push(Variable {
             name,
-            depth: None,
+            depth,
             is_captured: false,
         });
         Ok(())

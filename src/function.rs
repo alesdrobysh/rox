@@ -5,6 +5,7 @@ use crate::{chunk::Chunk, value::Value};
 #[derive(Debug, Clone)]
 pub enum FunctionType {
     Function,
+    Method,
     Script,
 }
 
@@ -31,6 +32,7 @@ impl fmt::Display for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.function_type {
             FunctionType::Function => write!(f, "fn {}", self.name),
+            FunctionType::Method => write!(f, "method {}", self.name),
             FunctionType::Script => write!(f, "<script>"),
         }
     }

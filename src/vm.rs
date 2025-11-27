@@ -119,7 +119,9 @@ impl VM {
 
                         Value::BoundMethod(bound_method) => {
                             let closure = Rc::clone(&bound_method.borrow().method);
-
+                            let top = self.stack.len() - 1;
+                            self.stack[top] =
+                                Value::Instance(bound_method.borrow().receiver.clone());
                             self.call_closure(closure, arg_count, line, callee_index)?;
                         }
 
