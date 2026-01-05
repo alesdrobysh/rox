@@ -73,7 +73,7 @@ impl fmt::Display for Value {
                 upvalue.borrow().location,
                 upvalue.borrow().closed
             ),
-            Self::Class(class) => write!(f, "class {}", class.borrow().name),
+            Self::Class(class) => write!(f, "{}", class.borrow().name),
             Self::Instance(instance) => {
                 write!(f, "instance {}", instance.borrow().class.borrow().name)
             }

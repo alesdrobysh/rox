@@ -6,6 +6,7 @@ use crate::{chunk::Chunk, value::Value};
 pub enum FunctionType {
     Function,
     Method,
+    Initializer,
     Script,
 }
 
@@ -33,6 +34,7 @@ impl fmt::Display for Function {
         match self.function_type {
             FunctionType::Function => write!(f, "fn {}", self.name),
             FunctionType::Method => write!(f, "method {}", self.name),
+            FunctionType::Initializer => write!(f, "initializer {}", self.name),
             FunctionType::Script => write!(f, "<script>"),
         }
     }

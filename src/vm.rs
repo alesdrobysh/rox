@@ -113,8 +113,22 @@ impl VM {
                         }
 
                         Value::Class(class) => {
-                            let instance = Instance::new(class);
-                            self.push_stack(Value::instance(instance));
+                            self.stack[callee_index] =
+                                Value::instance(Instance::new(class.clone()));
+
+                            if let Some(initializer) = class.borrow().methods.get("init") {
+                                self.call_closure(
+                                    initializer.clone(),
+                                    arg_count,
+                                    line,
+                                    callee_index,
+                                )?;
+                            } else if arg_count != 0 {
+                                return self.runtime_error(
+                                    &format!("Expected 0 arguments but got {}", arg_count),
+                                    line,
+                                );
+                            }
                         }
 
                         Value::BoundMethod(bound_method) => {

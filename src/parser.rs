@@ -130,6 +130,7 @@ impl<'a> Parser<'a> {
 
         let zero_slot_name = match function_type {
             FunctionType::Method => "this",
+            FunctionType::Initializer => "this",
             _ => "",
         };
 
@@ -170,6 +171,13 @@ impl<'a> Parser<'a> {
         self.end_scope()?;
 
         let line = self.previous.ok_or("Unexpected end of input")?.line;
+
+        if matches!(function_type, FunctionType::Initializer) {
+            chunk.extend(vec![
+                Instruction::new(OpCode::GetLocal(0), line),
+                Instruction::new(OpCode::Return, line),
+            ]);
+        }
 
         if !matches!(
             chunk.get_last_instruction().map(|i| &i.op_code),
@@ -212,9 +220,15 @@ impl<'a> Parser<'a> {
         let name = self.parse_variable("Expect method name")?;
         let line = self.previous.ok_or("Unexpected end of input")?.line;
 
-        self.function_types.push(FunctionType::Method);
+        let function_type = if name == "init" {
+            FunctionType::Initializer
+        } else {
+            FunctionType::Method
+        };
 
-        let mut operations = self.function(name.clone(), FunctionType::Method)?;
+        self.function_types.push(function_type.clone());
+
+        let mut operations = self.function(name.clone(), function_type)?;
 
         self.function_types.pop();
 
@@ -384,7 +398,10 @@ impl<'a> Parser<'a> {
 
         match self.function_types.last() {
             Some(FunctionType::Script) => {
-                return Err("Cannot return from top-level code.".to_string());
+                return Err("Can't return from top-level code.".to_string());
+            }
+            Some(FunctionType::Initializer) => {
+                return Err("Can't return a value from an initializer.".to_string());
             }
             _ => (),
         }
