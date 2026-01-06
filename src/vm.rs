@@ -46,6 +46,7 @@ pub struct VM {
     globals: HashMap<String, Value>,
     call_frame_stack: CallFrameStack,
     open_upvalues: Vec<Rc<Upvalue>>,
+    debug: bool,
 }
 
 impl VM {
@@ -56,11 +57,16 @@ impl VM {
             Value::NativeFunction(Rc::new(NativeFunction::new("clock", clock))),
         );
 
+        let debug = std::env::var("DEBUG")
+            .map(|level| level == "debug")
+            .unwrap_or(false);
+
         VM {
             stack: Vec::new(),
             globals,
             call_frame_stack: CallFrameStack::new(),
             open_upvalues: Vec::new(),
+            debug,
         }
     }
 
@@ -448,14 +454,12 @@ impl VM {
                 }
             }
 
-            if let Ok(level) = std::env::var("DEBUG") {
-                if level == "debug" {
-                    eprintln!(
-                        "Handled instruction: {:?}\nStack: {}\n",
-                        &instruction.op_code,
-                        format_stack(&self.stack)
-                    );
-                }
+            if self.debug {
+                eprintln!(
+                    "Handled instruction: {:?}\nStack: {}\n",
+                    &instruction.op_code,
+                    format_stack(&self.stack)
+                );
             }
         }
     }
