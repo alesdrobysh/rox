@@ -34,6 +34,7 @@ pub enum OpCode {
     SetProperty(String),
     GetProperty(String),
     Method(String),
+    Invoke(String, usize),
 }
 
 fn format_function(function: &Function) -> String {
@@ -97,6 +98,7 @@ impl fmt::Display for Instruction {
             OpCode::SetProperty(name) => format!("SET_PROPERTY {}", name),
             OpCode::GetProperty(name) => format!("GET_PROPERTY {}", name),
             OpCode::Method(name) => format!("METHOD {}", name),
+            OpCode::Invoke(name, arg_count) => format!("INVOKE {} ({})", name, arg_count),
         };
 
         write!(f, "line {:3}: {}", self.line, op_str)

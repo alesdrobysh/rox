@@ -452,6 +452,57 @@ impl VM {
                         }
                     }
                 }
+                OpCode::Invoke(name, arg_count) => {
+                    let arg_count = *arg_count;
+                    let receiver_index = self.stack.len() - arg_count - 1;
+                    let receiver = self.stack[receiver_index].clone();
+
+                    match receiver {
+                        Value::Instance(instance) => {
+                            if let Some(method) = instance.borrow().class.borrow().methods.get(name)
+                            {
+                                self.call_closure(method.clone(), arg_count, line, receiver_index)?;
+                            } else if let Some(field) = instance.borrow().fields.get(name) {
+                                let field_value = field.clone();
+                                self.stack[receiver_index] = field_value;
+
+                                match self.stack[receiver_index].clone() {
+                                    Value::Closure(closure) => {
+                                        self.call_closure(
+                                            closure,
+                                            arg_count,
+                                            line,
+                                            receiver_index,
+                                        )?;
+                                    }
+                                    _ => {
+                                        return self.runtime_error(
+                                            &format!(
+                                                "'{}' is not a method or callable field",
+                                                name
+                                            ),
+                                            line,
+                                        );
+                                    }
+                                }
+                            } else {
+                                return self.runtime_error(
+                                    &format!("Undefined property '{}'", name),
+                                    line,
+                                );
+                            }
+                        }
+                        _ => {
+                            return self.runtime_error(
+                                &format!(
+                                    "Only instances have methods. Expected instance, got {}",
+                                    receiver.type_name()
+                                ),
+                                line,
+                            );
+                        }
+                    }
+                }
             }
 
             if self.debug {

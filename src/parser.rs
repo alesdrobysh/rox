@@ -946,6 +946,10 @@ impl<'a> Parser<'a> {
             let mut instructions = self.expression()?;
             instructions.push(Instruction::new(OpCode::SetProperty(lexeme), line));
             Ok(instructions)
+        } else if self.match_token(TokenType::LeftParen)? {
+            let (mut instructions, count) = self.arguments()?;
+            instructions.push(Instruction::new(OpCode::Invoke(lexeme, count), line));
+            Ok(instructions)
         } else {
             Ok(vec![Instruction::new(OpCode::GetProperty(lexeme), line)])
         }
