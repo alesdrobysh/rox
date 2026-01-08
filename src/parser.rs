@@ -81,13 +81,32 @@ impl<'a> Parser<'a> {
     fn class_declaration(&mut self) -> Result<Vec<Instruction>, String> {
         self.in_class = true;
 
-        let name = self.parse_variable("Expect class name")?;
+        let classname = self.parse_variable("Expect class name")?;
         let line = self.previous.ok_or("Unexpected end of input")?.line;
 
-        let mut result = vec![Instruction::new(OpCode::Class(name.clone()), line)];
-        let variable = self.define_variable(name.clone(), line)?;
+        let mut result = vec![Instruction::new(OpCode::Class(classname.clone()), line)];
+        let variable = self.define_variable(classname.clone(), line)?;
         result.extend(variable);
-        result.extend(self.named_variable(&name, line, false)?);
+        result.extend(self.named_variable(&classname, line, false)?);
+
+        if self.match_token(TokenType::Less)? {
+            let superclass = self.consume(TokenType::Identifier, "Expect superclass name.")?;
+            let line = superclass.line;
+            let lexeme = superclass.lexeme.to_string();
+
+            if superclass.lexeme == &classname {
+                return Err(self.format_error(
+                    line,
+                    &lexeme,
+                    "A class cannot inherit from itself.",
+                ));
+            }
+
+            result.extend(self.named_variable(&classname, line, false)?);
+            result.extend(self.variable(false)?);
+
+            result.push(Instruction::new(OpCode::Inherit, line));
+        }
 
         self.consume(TokenType::LeftBrace, "Expect '{' before class body.")?;
 
@@ -1071,10 +1090,7 @@ impl<'a> Parser<'a> {
             return Ok(vec![]);
         }
 
-        let error_string = format!(
-            "[line {}] Error at {}: {}",
-            token.line, token.lexeme, message
-        );
+        let error_string = self.format_error(token.line, token.lexeme, message);
 
         self.error = Some(error_string.clone());
 
@@ -1083,6 +1099,10 @@ impl<'a> Parser<'a> {
 
     fn get_line(&mut self) -> Result<usize, String> {
         Ok(self.previous.ok_or("Cannot get current line")?.line)
+    }
+
+    fn format_error(&self, line: usize, lexeme: &str, message: &str) -> String {
+        format!("[line {}] Error at {}: {}", line, lexeme, message)
     }
 }
 

@@ -503,6 +503,31 @@ impl VM {
                         }
                     }
                 }
+                OpCode::Inherit => {
+                    let superclass = self.peek_stack_at(0, line)?;
+                    let subclass = self.peek_stack_at(1, line)?;
+
+                    match (&superclass, &subclass) {
+                        (Value::Class(superclass_rc), Value::Class(subclass_rc)) => {
+                            subclass_rc
+                                .borrow_mut()
+                                .methods
+                                .extend(superclass_rc.borrow().methods.clone());
+
+                            self.pop_stack(1)?; // leave subclass on the stack
+                        }
+                        _ => {
+                            return self.runtime_error(
+                                &format!(
+                                    "Cannot inherit from non-class value. Expected class inheriting from class, got {} inheriting from {}",
+                                    subclass.type_name(),
+                                    superclass.type_name()
+                                ),
+                                line,
+                            );
+                        }
+                    }
+                }
             }
 
             if self.debug {

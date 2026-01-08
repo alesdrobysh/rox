@@ -35,6 +35,7 @@ pub enum OpCode {
     GetProperty(String),
     Method(String),
     Invoke(String, usize),
+    Inherit,
 }
 
 fn format_function(function: &Function) -> String {
@@ -99,6 +100,7 @@ impl fmt::Display for Instruction {
             OpCode::GetProperty(name) => format!("GET_PROPERTY {}", name),
             OpCode::Method(name) => format!("METHOD {}", name),
             OpCode::Invoke(name, arg_count) => format!("INVOKE {} ({})", name, arg_count),
+            OpCode::Inherit => "INHERIT".to_string(),
         };
 
         write!(f, "line {:3}: {}", self.line, op_str)
