@@ -139,8 +139,7 @@ impl VM {
 
                         Value::BoundMethod(bound_method) => {
                             let closure = Rc::clone(&bound_method.borrow().method);
-                            let top = self.stack.len() - 1;
-                            self.stack[top] =
+                            self.stack[callee_index] =
                                 Value::Instance(bound_method.borrow().receiver.clone());
                             self.call_closure(closure, arg_count, line, callee_index)?;
                         }
@@ -504,8 +503,8 @@ impl VM {
                     }
                 }
                 OpCode::Inherit => {
-                    let superclass = self.peek_stack_at(0, line)?;
-                    let subclass = self.peek_stack_at(1, line)?;
+                    let superclass = self.peek_stack_at(1, line)?;
+                    let subclass = self.peek_stack_at(0, line)?;
 
                     match (&superclass, &subclass) {
                         (Value::Class(superclass_rc), Value::Class(subclass_rc)) => {
@@ -514,7 +513,7 @@ impl VM {
                                 .methods
                                 .extend(superclass_rc.borrow().methods.clone());
 
-                            self.pop_stack(1)?; // leave subclass on the stack
+                            self.pop_stack(line)?;
                         }
                         _ => {
                             return self.runtime_error(
@@ -528,12 +527,57 @@ impl VM {
                         }
                     }
                 }
+                OpCode::GetSuper(method_name) => {
+                    let superclass = self.pop_stack(line)?;
+                    let instance = self.peek_stack(line)?;
+
+                    match (&superclass, &instance) {
+                        (Value::Class(superclass_rc), Value::Instance(instance_rc)) => {
+                            let superclass = superclass_rc.borrow();
+
+                            let superclass_name = superclass.name.clone();
+                            let method_option = superclass.methods.get(method_name).clone();
+
+                            if let Some(method_rc) = method_option {
+                                let bound_method =
+                                    BoundMethod::new(method_rc.clone(), instance_rc.clone());
+                                self.push_stack(Value::bound_method(bound_method));
+                            } else {
+                                return self.runtime_error(
+                                    &format!(
+                                        "Cannot find method {} in superclass {}",
+                                        method_name, superclass_name
+                                    ),
+                                    line,
+                                );
+                            }
+
+                            ()
+                        }
+                        (Value::Class(_), _) => {
+                            return self.runtime_error(
+                                &format!("Cannot run method {} on non-instance value. Expected instance, got {}", method_name, instance.type_name()),
+                                line,
+                            );
+                        }
+                        (_, _) => {
+                            return self.runtime_error(
+                                &format!(
+                                    "Cannot resolve 'super'. Expected class, got {}",
+                                    superclass.type_name()
+                                ),
+                                line,
+                            );
+                        }
+                    }
+                }
             }
 
             if self.debug {
                 eprintln!(
-                    "Handled instruction: {:?}\nStack: {}\n",
+                    "Handled instruction: {:?}\nLine: {}\nStack: {}\n",
                     &instruction.op_code,
+                    line,
                     format_stack(&self.stack)
                 );
             }

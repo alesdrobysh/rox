@@ -19,6 +19,7 @@ pub struct Parser<'a> {
     compilation_context: CompilationContext,
     function_types: Vec<FunctionType>,
     in_class: bool,
+    has_superclass: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -33,6 +34,7 @@ impl<'a> Parser<'a> {
             compilation_context: CompilationContext::new(None),
             function_types: Vec::new(),
             in_class: false,
+            has_superclass: false,
         }
     }
 
@@ -87,26 +89,32 @@ impl<'a> Parser<'a> {
         let mut result = vec![Instruction::new(OpCode::Class(classname.clone()), line)];
         let variable = self.define_variable(classname.clone(), line)?;
         result.extend(variable);
-        result.extend(self.named_variable(&classname, line, false)?);
 
         if self.match_token(TokenType::Less)? {
             let superclass = self.consume(TokenType::Identifier, "Expect superclass name.")?;
             let line = superclass.line;
-            let lexeme = superclass.lexeme.to_string();
+            let superclassname = superclass.lexeme.to_string();
 
             if superclass.lexeme == &classname {
                 return Err(self.format_error(
                     line,
-                    &lexeme,
+                    &superclassname,
                     "A class cannot inherit from itself.",
                 ));
             }
 
+            self.has_superclass = true;
+            self.begin_scope();
+
+            result.extend(self.named_variable(&superclassname, line, false)?);
+            self.compilation_context.add_local("super".to_string())?;
+            self.define_variable("super".to_string(), line)?;
+
             result.extend(self.named_variable(&classname, line, false)?);
-            result.extend(self.variable(false)?);
 
             result.push(Instruction::new(OpCode::Inherit, line));
         }
+        result.extend(self.named_variable(&classname, line, false)?);
 
         self.consume(TokenType::LeftBrace, "Expect '{' before class body.")?;
 
@@ -117,8 +125,12 @@ impl<'a> Parser<'a> {
         self.consume(TokenType::RightBrace, "Expect '}' after class body.")?;
 
         result.push(Instruction::new(OpCode::Pop, line));
+        if self.has_superclass {
+            result.extend(self.end_scope()?);
+        }
 
         self.in_class = false;
+        self.has_superclass = false;
 
         Ok(result)
     }
@@ -236,8 +248,9 @@ impl<'a> Parser<'a> {
     }
 
     fn method(&mut self) -> Result<Vec<Instruction>, String> {
-        let name = self.parse_variable("Expect method name")?;
-        let line = self.previous.ok_or("Unexpected end of input")?.line;
+        let token = self.consume(TokenType::Identifier, "Expect method name.")?;
+        let name = token.lexeme.to_string();
+        let line = token.line;
 
         let function_type = if name == "init" {
             FunctionType::Initializer
@@ -701,6 +714,7 @@ impl<'a> Parser<'a> {
         let call = Box::new(|parser: &mut Parser| parser.call());
         let dot = Box::new(|parser: &mut Parser, can_assign: bool| parser.dot(can_assign));
         let this = Box::new(|parser: &mut Parser| parser.this());
+        let super_ = Box::new(|parser: &mut Parser| parser.super_());
 
         match operator {
             TokenType::LeftParen => ParseRule {
@@ -773,6 +787,11 @@ impl<'a> Parser<'a> {
             },
             TokenType::This => ParseRule {
                 prefix: Some(PrefixParseFn::ParseFn(this)),
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Super => ParseRule {
+                prefix: Some(PrefixParseFn::ParseFn(super_)),
                 infix: None,
                 precedence: Precedence::None,
             },
@@ -983,6 +1002,37 @@ impl<'a> Parser<'a> {
         }
 
         self.variable(false)
+    }
+
+    fn super_(&mut self) -> Result<Vec<Instruction>, String> {
+        if !self.in_class {
+            return self.error_at(
+                &self.previous.unwrap(),
+                "Can't use 'super' outside of a class.",
+            );
+        }
+
+        if !self.has_superclass {
+            return self.error_at(
+                &self.previous.unwrap(),
+                "Can't use 'super' in a class with no superclass.",
+            );
+        }
+
+        self.consume(TokenType::Dot, "Expect '.' after 'super'.")?;
+        let method_name_token =
+            self.consume(TokenType::Identifier, "Expect superclass method name.")?;
+
+        let line = method_name_token.line;
+        let method_name = method_name_token.lexeme.to_string();
+
+        let mut instructions = vec![];
+
+        instructions.extend(self.named_variable("this", line, false)?);
+        instructions.extend(self.named_variable("super", line, false)?);
+        instructions.push(Instruction::new(OpCode::GetSuper(method_name), line));
+
+        Ok(instructions)
     }
 
     fn named_variable(
