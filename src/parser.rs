@@ -1029,8 +1029,20 @@ impl<'a> Parser<'a> {
         let mut instructions = vec![];
 
         instructions.extend(self.named_variable("this", line, false)?);
-        instructions.extend(self.named_variable("super", line, false)?);
-        instructions.push(Instruction::new(OpCode::GetSuper(method_name), line));
+
+        if self.match_token(TokenType::LeftParen)? {
+            let (args_instructions, count) = self.arguments()?;
+
+            instructions.extend(args_instructions);
+            instructions.extend(self.named_variable("super", line, false)?);
+            instructions.push(Instruction::new(
+                OpCode::SuperInvoke(method_name, count),
+                line,
+            ));
+        } else {
+            instructions.extend(self.named_variable("super", line, false)?);
+            instructions.push(Instruction::new(OpCode::GetSuper(method_name), line));
+        }
 
         Ok(instructions)
     }

@@ -37,6 +37,7 @@ pub enum OpCode {
     Invoke(String, usize),
     Inherit,
     GetSuper(String),
+    SuperInvoke(String, usize),
 }
 
 fn format_function(function: &Function) -> String {
@@ -103,6 +104,9 @@ impl fmt::Display for Instruction {
             OpCode::Invoke(name, arg_count) => format!("INVOKE {} ({})", name, arg_count),
             OpCode::Inherit => "INHERIT".to_string(),
             OpCode::GetSuper(name) => format!("GET_SUPER {}", name),
+            OpCode::SuperInvoke(name, arg_count) => {
+                format!("SUPER_INVOKE {} ({})", name, arg_count)
+            }
         };
 
         write!(f, "line {:3}: {}", self.line, op_str)

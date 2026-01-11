@@ -571,6 +571,56 @@ impl VM {
                         }
                     }
                 }
+                OpCode::SuperInvoke(method_name, arg_count) => {
+                    let superclass = self.pop_stack(line)?;
+                    let arg_count = *arg_count;
+                    let instance_index = self.stack.len() - arg_count - 1;
+                    let instance = self.stack[instance_index].clone();
+
+                    match (&superclass, &instance) {
+                        (Value::Class(superclass_rc), Value::Instance(_)) => {
+                            let superclass = superclass_rc.borrow();
+
+                            let superclass_name = superclass.name.clone();
+
+                            if let Some(method_rc) = superclass.methods.get(method_name) {
+                                self.call_closure(
+                                    method_rc.clone(),
+                                    arg_count,
+                                    line,
+                                    instance_index,
+                                )?;
+                            } else {
+                                return self.runtime_error(
+                                    &format!(
+                                        "Cannot find method {} in superclass {}",
+                                        method_name, superclass_name
+                                    ),
+                                    line,
+                                );
+                            }
+                        }
+                        (Value::Class(_), _) => {
+                            return self.runtime_error(
+                                &format!(
+                                    "Cannot invoke method {} on non-instance value. Expected instance, got {}",
+                                    method_name,
+                                    instance.type_name()
+                                ),
+                                line,
+                            );
+                        }
+                        (_, _) => {
+                            return self.runtime_error(
+                                &format!(
+                                    "Cannot resolve 'super'. Expected class, got {}",
+                                    superclass.type_name()
+                                ),
+                                line,
+                            );
+                        }
+                    }
+                }
             }
 
             if self.debug {
