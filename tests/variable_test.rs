@@ -3,6 +3,29 @@ mod test_utils;
 use test_utils::{interpret_file_result, interpret_file_stdout};
 
 #[test]
+fn collide_with_parameter() {
+    assert!(interpret_file_result("examples/variable/collide_with_parameter.lox").is_err());
+}
+
+#[test]
+fn duplicate_local() {
+    assert!(interpret_file_result("examples/variable/duplicate_local.lox").is_err());
+}
+
+// #[test]
+// fn duplicate_parameter() {
+//     assert!(interpret_file_result("examples/variable/duplicate_parameter.lox").is_err());
+// }
+
+#[test]
+fn early_bound() {
+    assert_eq!(
+        interpret_file_stdout("examples/variable/early_bound.lox"),
+        "\"outer\"\n\"outer\"\n"
+    );
+}
+
+#[test]
 fn in_middle_of_block() {
     assert_eq!(
         interpret_file_stdout("examples/variable/in_middle_of_block.lox"),
@@ -15,6 +38,22 @@ fn in_nested_block() {
     assert_eq!(
         interpret_file_stdout("examples/variable/in_nested_block.lox"),
         "\"outer\"\n"
+    );
+}
+
+#[test]
+fn local_from_method() {
+    assert_eq!(
+        interpret_file_stdout("examples/variable/local_from_method.lox"),
+        "\"variable\"\n"
+    );
+}
+
+#[test]
+fn redeclare_global() {
+    assert_eq!(
+        interpret_file_stdout("examples/variable/redeclare_global.lox"),
+        "nil\n"
     );
 }
 
@@ -59,6 +98,16 @@ fn shadow_local() {
 }
 
 #[test]
+fn undefined_global() {
+    assert!(interpret_file_result("examples/variable/undefined_global.lox").is_err());
+}
+
+#[test]
+fn undefined_local() {
+    assert!(interpret_file_result("examples/variable/undefined_local.lox").is_err());
+}
+
+#[test]
 fn uninitialized() {
     assert_eq!(
         interpret_file_stdout("examples/variable/uninitialized.lox"),
@@ -75,6 +124,11 @@ fn unreached_undefined() {
 }
 
 #[test]
+fn use_false_as_var() {
+    assert!(interpret_file_result("examples/variable/use_false_as_var.lox").is_err());
+}
+
+#[test]
 fn use_global_in_initializer() {
     assert_eq!(
         interpret_file_stdout("examples/variable/use_global_in_initializer.lox"),
@@ -83,18 +137,8 @@ fn use_global_in_initializer() {
 }
 
 #[test]
-fn undefined_global() {
-    assert!(interpret_file_result("examples/variable/undefined_global.lox").is_err());
-}
-
-#[test]
-fn undefined_local() {
-    assert!(interpret_file_result("examples/variable/undefined_local.lox").is_err());
-}
-
-#[test]
-fn use_false_as_var() {
-    assert!(interpret_file_result("examples/variable/use_false_as_var.lox").is_err());
+fn use_local_in_initializer() {
+    assert!(interpret_file_result("examples/variable/use_local_in_initializer.lox").is_err());
 }
 
 #[test]
@@ -105,24 +149,4 @@ fn use_nil_as_var() {
 #[test]
 fn use_this_as_var() {
     assert!(interpret_file_result("examples/variable/use_this_as_var.lox").is_err());
-}
-
-#[test]
-fn duplicate_local() {
-    assert!(interpret_file_result("examples/variable/duplicate_local.lox").is_err());
-}
-
-// #[test]
-// fn duplicate_parameter() {
-//     assert!(interpret_file_result("examples/variable/duplicate_parameter.lox").is_err());
-// }
-
-// #[test]
-// fn collide_with_parameter() {
-//     assert!(interpret_file_result("examples/variable/collide_with_parameter.lox").is_err());
-// }
-
-#[test]
-fn use_local_in_initializer() {
-    assert!(interpret_file_result("examples/variable/use_local_in_initializer.lox").is_err());
 }

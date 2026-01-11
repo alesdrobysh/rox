@@ -15,7 +15,7 @@ fn global() {
     assert_eq!(
         interpret_file_stdout("examples/assignment/global.lox"),
         "\"before\"\n\"after\"\n\"arg\"\n\"arg\"\n"
-    )
+    );
 }
 
 #[test]
@@ -33,7 +33,7 @@ fn local() {
     assert_eq!(
         interpret_file_stdout("examples/assignment/local.lox"),
         "\"before\"\n\"after\"\n\"arg\"\n\"arg\"\n"
-    )
+    );
 }
 
 #[test]
@@ -46,7 +46,12 @@ fn syntax() {
     assert_eq!(
         interpret_file_stdout("examples/assignment/syntax.lox"),
         "\"var\"\n\"var\"\n"
-    )
+    );
+}
+
+#[test]
+fn to_this() {
+    assert!(interpret_file_result("examples/assignment/to_this.lox").is_err());
 }
 
 #[test]

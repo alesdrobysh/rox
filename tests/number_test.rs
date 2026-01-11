@@ -1,18 +1,15 @@
 mod test_utils;
 
-use test_utils::interpret_file_stdout;
+use test_utils::{interpret_file_result, interpret_file_stdout};
 
 #[test]
 fn decimal_point_at_eof() {
-    assert_eq!(
-        interpret_file_stdout("examples/number/decimal_point_at_eof.lox"),
-        ""
-    );
+    assert!(interpret_file_result("examples/number/decimal_point_at_eof.lox").is_err());
 }
 
 #[test]
 fn leading_dot() {
-    assert_eq!(interpret_file_stdout("examples/number/leading_dot.lox"), "");
+    assert!(interpret_file_result("examples/number/leading_dot.lox").is_err());
 }
 
 #[test]
@@ -23,10 +20,15 @@ fn literals() {
     );
 }
 
+// #[test]
+// fn nan_equality() {
+//     assert_eq!(
+//         interpret_file_stdout("examples/number/nan_equality.lox"),
+//         "false\ntrue\nfalse\ntrue\n"
+//     );
+// }
+
 #[test]
 fn trailing_dot() {
-    assert_eq!(
-        interpret_file_stdout("examples/number/trailing_dot.lox"),
-        ""
-    );
+    assert!(interpret_file_result("examples/number/trailing_dot.lox").is_err());
 }
