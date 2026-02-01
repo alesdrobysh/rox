@@ -26,10 +26,10 @@ fn only_line_comment_and_line() {
     );
 }
 
-// #[test]
-// fn unicode() {
-//     assert_eq!(
-//         interpret_file_stdout("examples/comments/unicode.lox"),
-//         "\"ok\"\n"
-//     );
-// }
+#[test]
+fn unicode() {
+    assert_eq!(
+        interpret_file_stdout("examples/comments/unicode.lox"),
+        "\"ok\"\n"
+    );
+}

@@ -199,14 +199,15 @@ impl<'a> Scanner<'a> {
     }
 
     fn peek(&self) -> char {
-        match self.source.chars().nth(self.current) {
+        match self.source[self.current..].chars().next() {
             Some(c) => c,
             None => '\0',
         }
     }
 
     fn peek_next(&self) -> char {
-        match self.source.chars().nth(self.current + 1) {
+        let current_len = self.peek().len_utf8();
+        match self.source[self.current + current_len..].chars().next() {
             Some(c) => c,
             None => '\0',
         }
@@ -217,26 +218,26 @@ impl<'a> Scanner<'a> {
             return false;
         }
 
-        match self.source.chars().nth(self.current) {
-            Some(c) => {
+        match self.peek() {
+            '\0' => false,
+            c => {
                 if c != expected {
                     return false;
                 }
 
-                self.current += 1;
+                self.current += c.len_utf8();
                 true
             }
-            None => false,
         }
     }
 
     fn advance(&mut self) -> char {
-        match self.source.chars().nth(self.current) {
-            Some(c) => {
-                self.current += 1;
+        match self.peek() {
+            '\0' => '\0',
+            c => {
+                self.current += c.len_utf8();
                 c
             }
-            None => '\0',
         }
     }
 
