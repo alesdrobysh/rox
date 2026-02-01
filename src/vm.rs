@@ -285,7 +285,16 @@ impl VM {
                         );
                     }
 
-                    self.stack[absolute_index] = self.peek_stack(line)?;
+                    let value = self.peek_stack(line)?;
+                    self.stack[absolute_index] = value.clone();
+
+                    for upvalue in &self.open_upvalues {
+                        if let Some(stack_index) = *upvalue.stack_index.borrow() {
+                            if stack_index == absolute_index {
+                                *upvalue.location.borrow_mut() = value.clone();
+                            }
+                        }
+                    }
                 }
                 OpCode::GetLocal(index) => {
                     let absolute_index = self.to_absolute_index(*index);

@@ -15,13 +15,13 @@ fn class_in_body() {
     assert!(interpret_file_result("examples/for/class_in_body.lox").is_err());
 }
 
-// #[test]
-// fn closure_in_body() {
-//     assert_eq!(
-//         interpret_file_stdout("examples/for/closure_in_body.lox"),
-//         "4\n1\n4\n2\n4\n3\n"
-//     );
-// }
+#[test]
+fn closure_in_body() {
+    assert_eq!(
+        interpret_file_stdout("examples/for/closure_in_body.lox"),
+        "4\n1\n4\n2\n4\n3\n"
+    );
+}
 
 #[test]
 fn fun_in_body() {
