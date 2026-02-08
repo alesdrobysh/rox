@@ -137,18 +137,36 @@ impl<'a> Parser<'a> {
 
     fn fun_declaration(&mut self) -> Result<Vec<Instruction>, String> {
         let name = self.parse_variable("Expect function name")?;
+        let line = self.previous.ok_or("Unexpected end of input")?.line;
+
+        let depth = self.compilation_context.get_depth();
+
+        if depth > 0 {
+            self.compilation_context.mark_initialized()?;
+        }
 
         self.function_types.push(FunctionType::Function);
 
         let function = self.function(name.clone(), FunctionType::Function)?;
-        let variable = self.define_variable(
-            name.clone(),
-            self.previous.ok_or("Unexpected end of input")?.line,
-        )?;
 
         self.function_types.pop();
 
-        Ok([function, variable].concat())
+        if depth > 0 {
+            let local_index = self
+                .compilation_context
+                .resolve_local(&name)?
+                .ok_or_else(|| format!("Failed to resolve local function '{}'", name))?;
+
+            let mut instructions = vec![Instruction::new(OpCode::Value(Value::Nil), line)];
+            instructions.extend(function);
+            instructions.push(Instruction::new(OpCode::SetLocal(local_index), line));
+            instructions.push(Instruction::new(OpCode::Pop, line));
+
+            Ok(instructions)
+        } else {
+            let variable = self.define_variable(name.clone(), line)?;
+            Ok([function, variable].concat())
+        }
     }
 
     fn function(

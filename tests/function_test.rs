@@ -25,13 +25,13 @@ fn local_mutual_recursion() {
     assert!(interpret_file_result("examples/function/local_mutual_recursion.lox").is_err());
 }
 
-// #[test]
-// fn local_recursion() {
-//     assert_eq!(
-//         interpret_file_stdout("examples/function/local_recursion.lox"),
-//         "21\n"
-//     );
-// }
+#[test]
+fn local_recursion() {
+    assert_eq!(
+        interpret_file_stdout("examples/function/local_recursion.lox"),
+        "21\n"
+    );
+}
 
 #[test]
 fn missing_arguments() {
